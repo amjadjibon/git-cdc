@@ -1,0 +1,9 @@
+[package]
+name = "git-cdc-core"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1"
+blake3 = { version = "1", features = ["std"] }
+fastcdc = "4.0.1"
