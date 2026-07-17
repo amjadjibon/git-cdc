@@ -7,7 +7,7 @@ max_iterations: 3
 max_phases: 5
 max_agents: 3
 current_iteration: 1
-status: awaiting-approval
+status: complete
 last_review_base: 'HEAD'
 ---
 
@@ -17,7 +17,7 @@ last_review_base: 'HEAD'
 
 | Iter | Verdict | Crit | High | Med | Low | Mode | Action |
 |------|---------|------|------|-----|-----|------|--------|
-| 1    | Approve | 0    | 0    | 0   | 2   | lite | clean exit — awaiting user approval |
+| 1    | Approve | 0    | 0    | 0   | 2   | lite | clean exit — approved |
 
 ## Stacked PRs
 
@@ -36,4 +36,4 @@ last_review_base: 'HEAD'
 - [x] dev-implement-plan (phases 1–4; mid-loop scope change to "both" modes per user)
 - [x] dev-qa (QA.md — 28 tests; S3 suites verified against MinIO in docker)
 - [x] dev-code-review (REVIEW.md — Approve: 2 Low, 1 Info, all accepted)
-- [x] decide → clean exit, awaiting user approval
+- [x] decide → clean exit, approved, merged to main
