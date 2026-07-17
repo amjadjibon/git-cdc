@@ -7,6 +7,7 @@ use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 use git_cdc_core::chunker::chunk_stream;
 use git_cdc_core::manifest::{is_manifest, Manifest};
+use git_cdc_core::protocol::{ObjectSpec, Operation};
 use git_cdc_core::store::{ChunkStore, DiskStore};
 
 #[derive(Parser)]
@@ -40,6 +41,10 @@ enum Cmd {
     Gc {
         #[arg(long)]
         dry_run: bool,
+        /// Unreferenced chunks younger than this survive (protects
+        /// just-cleaned, not-yet-committed chunks and in-flight uploads)
+        #[arg(long, default_value_t = 24 * 3600)]
+        grace_secs: u64,
     },
     /// Diff two manifest files (added/removed chunks and bytes)
     Diff { from: PathBuf, to: PathBuf },
@@ -51,9 +56,9 @@ fn main() -> Result<()> {
         Cmd::Track { patterns } => cmd_track(&patterns),
         Cmd::Clean => cmd_clean(),
         Cmd::Smudge => cmd_smudge(),
-        Cmd::Pull => bail!("pull is not implemented yet (plan phase 5)"),
-        Cmd::Push => bail!("push is not implemented yet (plan phase 5)"),
-        Cmd::Gc { .. } => bail!("gc is not implemented yet (plan phase 5)"),
+        Cmd::Pull => cmd_pull(),
+        Cmd::Push => cmd_push(),
+        Cmd::Gc { dry_run, grace_secs } => cmd_gc(dry_run, grace_secs),
         Cmd::Diff { from, to } => cmd_diff(&from, &to),
     }
 }
@@ -199,6 +204,264 @@ fn cmd_smudge() -> Result<()> {
     }
     if hasher.finalize() != m.oid {
         bail!("reassembled file does not match manifest oid — refusing to emit corrupt data");
+    }
+    Ok(())
+}
+
+// ---- sync: pull / push / gc ----------------------------------------------
+
+fn remote_client() -> Result<git_cdc_core::client::Client> {
+    let url = git_out(&["config", "--get", "cdc.url"])
+        .context("cdc.url is not configured; set it with `git config cdc.url <server>`")?;
+    let token = git_out(&["config", "--get", "cdc.token"])
+        .context("cdc.token is not configured; set it with `git config cdc.token <token>`")?;
+    Ok(git_cdc_core::client::Client::new(&url, &token))
+}
+
+fn oid_str(hash: &blake3::Hash) -> String {
+    format!("blake3:{}", hash.to_hex())
+}
+
+/// Every manifest blob across history (PLAN 5.2): `git rev-list --all
+/// --objects` for reachability, `cat-file --batch-check` to keep only
+/// plausibly-sized blobs, `cat-file --batch` to read and sniff them by
+/// their fixed first line — path/attribute matching would miss renamed
+/// or historical files.
+fn all_manifests() -> Result<Vec<Manifest>> {
+    use std::io::{BufRead, BufReader, BufWriter};
+    use std::process::Stdio;
+
+    let list = git_out(&["rev-list", "--all", "--objects"])?;
+    let mut shas: Vec<&str> = list
+        .lines()
+        .filter_map(|l| l.split(' ').next())
+        .filter(|s| !s.is_empty())
+        .collect();
+    shas.sort_unstable();
+    shas.dedup();
+
+    let mut cat = Git::new("git")
+        .args(["cat-file", "--batch"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .context("spawning git cat-file")?;
+    let mut to_git = BufWriter::new(cat.stdin.take().unwrap());
+    let mut from_git = BufReader::new(cat.stdout.take().unwrap());
+
+    // Manifests are ~90 bytes per chunk line; even a 100 GB file stays well
+    // under this cap. Anything bigger can't be ours — skip without reading.
+    const MAX_MANIFEST_SIZE: u64 = 16 * 1024 * 1024;
+
+    let mut manifests = Vec::new();
+    for sha in shas {
+        // Sequential request/response per object — no pipe deadlock.
+        writeln!(to_git, "{sha}")?;
+        to_git.flush()?;
+        let mut header = String::new();
+        from_git.read_line(&mut header)?;
+        let mut parts = header.split_whitespace();
+        let (_sha, typ, size) = (
+            parts.next().unwrap_or_default(),
+            parts.next().unwrap_or_default(),
+            parts.next().unwrap_or_default(),
+        );
+        if typ == "missing" {
+            continue;
+        }
+        let size: u64 = size.parse().with_context(|| format!("bad cat-file header: {header:?}"))?;
+        let mut body = vec![0u8; size as usize + 1]; // content + trailing LF
+        from_git.read_exact(&mut body)?;
+        body.pop();
+        if typ != "blob" || size > MAX_MANIFEST_SIZE || !is_manifest(&body) {
+            continue;
+        }
+        if let Ok(m) = Manifest::parse(&body) {
+            manifests.push(m);
+        }
+    }
+    drop(to_git);
+    cat.wait()?;
+    Ok(manifests)
+}
+
+/// Tracked (filter=cdc) paths in the index, with their staged manifests.
+fn index_manifests() -> Result<Vec<(String, Manifest)>> {
+    let files = git_out(&["ls-files"])?;
+    let mut out = Vec::new();
+    for path in files.lines() {
+        let attr = git_out(&["check-attr", "filter", "--", path])?;
+        if !attr.ends_with(": filter: cdc") {
+            continue;
+        }
+        let blob = Git::new("git")
+            .args(["show", &format!(":{path}")])
+            .output()?;
+        if !blob.status.success() {
+            continue;
+        }
+        if is_manifest(&blob.stdout) {
+            if let Ok(m) = Manifest::parse(&blob.stdout) {
+                out.push((path.to_string(), m));
+            }
+        }
+    }
+    Ok(out)
+}
+
+fn cmd_push() -> Result<()> {
+    let store = local_store()?;
+    let client = remote_client()?;
+
+    let mut chunks: std::collections::HashMap<blake3::Hash, u64> = Default::default();
+    for m in all_manifests()? {
+        for c in &m.chunks {
+            chunks.insert(c.hash, c.length as u64);
+        }
+    }
+    if chunks.is_empty() {
+        eprintln!("git-cdc: no manifests found, nothing to push");
+        return Ok(());
+    }
+
+    let objects: Vec<ObjectSpec> = chunks
+        .iter()
+        .map(|(h, size)| ObjectSpec { oid: oid_str(h), size: *size })
+        .collect();
+    let total = objects.len();
+    let resp = client.batch(Operation::Upload, objects)?;
+
+    let mut uploaded = 0usize;
+    for obj in &resp.objects {
+        let Some(action) = obj.actions.as_ref().and_then(|a| a.upload.as_ref()) else {
+            continue; // server already has it — the dedup win
+        };
+        let hash = git_cdc_core::manifest::parse_hash(&obj.oid)?;
+        let data = store.get(&hash).with_context(|| {
+            format!("server wants {} but it is not in the local store — run `git cdc pull` first", obj.oid)
+        })?;
+        // ponytail: sequential uploads; add bounded concurrency when a real
+        // repo shows transfer time dominated by round-trips.
+        client.upload(&action.href, data)?;
+        uploaded += 1;
+    }
+    eprintln!("git-cdc: pushed {uploaded} of {total} chunks ({} already on server)", total - uploaded);
+    Ok(())
+}
+
+fn cmd_pull() -> Result<()> {
+    let store = local_store()?;
+    let root = repo_root()?;
+    let tracked = index_manifests()?;
+    if tracked.is_empty() {
+        eprintln!("git-cdc: no tracked files in index, nothing to pull");
+        return Ok(());
+    }
+
+    // Fetch chunks the local store is missing.
+    let mut missing: std::collections::HashMap<blake3::Hash, u64> = Default::default();
+    for (_, m) in &tracked {
+        for c in &m.chunks {
+            if !store.has(&c.hash) {
+                missing.insert(c.hash, c.length as u64);
+            }
+        }
+    }
+    if !missing.is_empty() {
+        let client = remote_client()?;
+        let objects = missing
+            .iter()
+            .map(|(h, size)| ObjectSpec { oid: oid_str(h), size: *size })
+            .collect();
+        let resp = client.batch(Operation::Download, objects)?;
+        for obj in &resp.objects {
+            if let Some(err) = &obj.error {
+                bail!("server cannot provide {}: {} {}", obj.oid, err.code, err.message);
+            }
+            let href = &obj
+                .actions
+                .as_ref()
+                .and_then(|a| a.download.as_ref())
+                .with_context(|| format!("no download action for {}", obj.oid))?
+                .href;
+            let hash = git_cdc_core::manifest::parse_hash(&obj.oid)?;
+            let data = client.download(href)?;
+            store.put(&hash, &data)?; // verifies hash before admitting
+        }
+        eprintln!("git-cdc: fetched {} chunks", resp.objects.len());
+    }
+
+    // Materialize worktree files still in passed-through-manifest state.
+    let mut materialized = 0usize;
+    for (path, m) in &tracked {
+        let abs = root.join(path);
+        let worktree = fs::read(&abs).unwrap_or_default();
+        if !is_manifest(&worktree) {
+            continue; // already real content (or locally modified — leave it)
+        }
+        let mut out = Vec::with_capacity(m.size as usize);
+        let mut hasher = blake3::Hasher::new();
+        for c in &m.chunks {
+            let data = store.get(&c.hash)?;
+            hasher.update(&data);
+            out.extend_from_slice(&data);
+        }
+        if hasher.finalize() != m.oid {
+            bail!("{path}: reassembled content does not match manifest oid");
+        }
+        fs::write(&abs, out)?;
+        materialized += 1;
+    }
+    eprintln!("git-cdc: materialized {materialized} files");
+    Ok(())
+}
+
+fn cmd_gc(dry_run: bool, grace_secs: u64) -> Result<()> {
+    let store = local_store()?;
+    let grace = std::time::Duration::from_secs(grace_secs);
+    let live: std::collections::HashSet<blake3::Hash> = all_manifests()?
+        .iter()
+        .flat_map(|m| m.chunks.iter().map(|c| c.hash))
+        .collect();
+
+    // Local sweep: same mark-and-sweep + grace rule the server applies.
+    let now = std::time::SystemTime::now();
+    let mut swept = 0usize;
+    for hash in store.list()? {
+        if live.contains(&hash) {
+            continue;
+        }
+        let old_enough = fs::metadata(store.path_for(&hash))
+            .and_then(|md| md.modified())
+            .ok()
+            .and_then(|mtime| now.duration_since(mtime).ok())
+            .is_some_and(|age| age >= grace);
+        if !old_enough {
+            continue;
+        }
+        if dry_run {
+            eprintln!("would remove local {}", oid_str(&hash));
+        } else {
+            store.remove(&hash)?;
+        }
+        swept += 1;
+    }
+    eprintln!("git-cdc: local gc {} {swept} unreferenced chunks ({} live)",
+        if dry_run { "would remove" } else { "removed" }, live.len());
+
+    // Remote sweep, if a server is configured.
+    match remote_client() {
+        Ok(client) => {
+            let resp = client.gc(live.iter().map(oid_str).collect(), dry_run)?;
+            eprintln!(
+                "git-cdc: remote gc {} {} chunks ({} live, {} in grace period)",
+                if dry_run { "would remove" } else { "removed" },
+                resp.deleted.len(),
+                resp.kept_live,
+                resp.kept_grace
+            );
+        }
+        Err(_) => eprintln!("git-cdc: cdc.url not configured, skipped remote gc"),
     }
     Ok(())
 }
