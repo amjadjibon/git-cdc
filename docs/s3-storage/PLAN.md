@@ -1,76 +1,101 @@
 ---
 status: Planned
-version: 1.0
+version: 1.1
 date: 2026-07-17
 feature: s3-storage
 design: docs/git-cdc-mvp/DESIGN.md (§8, §13.5 — deferred from MVP)
 ---
 
-# Plan: S3 Chunk Storage Backend
+# Plan: S3 Chunk Storage (server backend + serverless mode)
 
-Give `git-cdc-server` an S3-compatible backend (AWS S3, MinIO, R2) selectable
-at startup, alongside the existing disk backend. Server-side only — the CLI
-keeps its local disk store and speaks the same batch API regardless of what
-the server stores chunks in.
+Two consumers of one S3 store implementation (user decision: "both"):
+
+1. **Server backend** — `git-cdc-server --backend s3` stores chunks in a
+   bucket instead of local disk. Central auth/policy point stays.
+2. **Serverless mode** — the CLI talks straight to the bucket
+   (`git config cdc.s3.bucket …`), no server process at all; IAM credentials
+   replace the bearer token, like restic/DVC.
 
 ## Assumptions
 
-- The server still proxies chunk bytes (basic transfer). Pre-signed URLs /
-  CDN offload stay v2 (DESIGN §13.5 → transfer adapters, §15.3).
 - `aws-sdk-s3` with the standard credential chain (env vars, profiles, IMDS);
-  MinIO/R2 via `--s3-endpoint` + force-path-style.
-- The sync `ChunkStore` trait in `git-cdc-core` stays as-is for the CLI's
-  local store. The server gets a small async `Backend` **enum** (disk | s3) —
-  two variants with one call site each; a trait object + `async_trait` would
-  be abstraction for a single use case.
-- S3 object keys are flat chunk hex (with optional `--s3-prefix`); directory
-  sharding is a filesystem concern S3 doesn't have.
-- GC needs per-chunk age: `Backend::list()` returns `(hash, modified)`;
-  disk uses file mtime (as today), S3 uses `LastModified`.
+  MinIO/R2 via endpoint override + force-path-style.
+- `S3Store` lives in `git-cdc-core` (one impl, two consumers). Core gains
+  the AWS SDK + a small tokio runtime for the CLI's blocking wrapper —
+  acceptable; the alternative is a copy in each crate.
+- The sync `ChunkStore` trait stays as-is for the local store. The server
+  gets a `Backend` **enum** (disk | s3), the CLI a `Remote` **enum**
+  (http | s3) — two variants, one call site each; no trait objects.
+- S3 keys are flat chunk hex under an optional prefix; directory sharding
+  is a filesystem concern S3 doesn't have.
+- Serverless upload negotiation uses one paginated `ListObjectsV2` into a
+  set (1 request/1000 chunks) rather than per-chunk `HeadObject`.
+- Serverless mode has no server-side upload verification — acceptable: a
+  client with bucket write access can write anything regardless; the read
+  path (chunk re-hash on get + whole-file oid check) still catches
+  corruption before it ever reaches a worktree.
+- GC needs per-chunk age: `list()` returns `(hash, modified)`; disk uses
+  file mtime, S3 uses `LastModified`. In serverless mode the CLI's
+  `--grace-secs` applies to the bucket sweep (there is no server to own it).
 
-## Phase 1: Async Backend enum + S3Store
+## Phase 1: Shared S3Store + server Backend enum
 
-Crate `crates/server`. Depends on: nothing.
+Depends on: nothing.
 
-- [ ] **1.1** Add deps: `aws-sdk-s3`, `aws-config`. New `backend` module:
-  `enum Backend { Disk(DiskStore), S3(S3Store) }` with
-  `async fn has/put/get/remove` and `async fn list() -> Vec<(Hash, Option<SystemTime>)>`.
-  Disk variant delegates to the existing sync store; `put` keeps the
-  verify-hash-before-admit guard in both variants.
-  *Done when*: `cargo build -p git-cdc-server` passes with handlers still on disk.
-- [ ] **1.2** `S3Store`: `head_object` (has), `put_object` (put, after hash
-  verify), `get_object` (get, re-verify hash on read like DiskStore),
-  `list_objects_v2` paginated (list, parsing hex keys, `LastModified` → age),
-  `delete_object` (remove). Config: bucket, optional key prefix, optional
-  endpoint URL + force-path-style for MinIO.
-  *Done when*: compiles; exercised by Phase 3 tests.
-- [ ] **1.3** Rewire `AppState`/handlers and GC onto `Backend` (GC's mtime
-  logic moves behind `list()`); CLI flags: `--backend disk|s3` (default
-  disk), `--s3-bucket`, `--s3-prefix`, `--s3-endpoint`,
-  `--s3-force-path-style`, region/creds from the AWS default chain.
+- [ ] **1.1** `git-cdc-core::s3`: `S3Store` — `head_object` (has),
+  `put_object` (put, after hash verify), `get_object` (get, re-verify on
+  read), paginated `list_objects_v2` (list with `LastModified`),
+  `delete_object` (remove); plus a shared client builder (endpoint override,
+  force-path-style, region fallback). Deps: `aws-sdk-s3`, `aws-config`,
+  `tokio` (rt).
+  *Done when*: `cargo build -p git-cdc-core` passes.
+- [ ] **1.2** Server `backend` module: `enum Backend { Disk(DiskStore),
+  S3(S3Store) }` with async `has/put/get/remove/list`; GC's mtime logic
+  moves behind `list()`. Rewire `AppState`/handlers.
   *Done when*: existing integration suite passes unchanged on the disk path.
+- [ ] **1.3** Server flags: `--backend disk|s3` (default disk; `--root`
+  required for disk, `--s3-bucket` required for s3 — enforced at startup,
+  not first request), `--s3-prefix`, `--s3-endpoint`,
+  `--s3-force-path-style`.
+  *Done when*: `--backend s3` without `--s3-bucket` errors at startup.
 
-## Phase 2: Tests
+## Phase 2: Serverless CLI mode
 
 Depends on: Phase 1.
 
-- [ ] **2.1** Existing server integration tests keep running against the disk
-  backend (regression gate for the refactor).
-  *Done when*: `cargo test --workspace` green.
-- [ ] **2.2** S3 integration test, env-gated (no S3 in the default test env):
-  `GIT_CDC_TEST_S3_ENDPOINT` + standard AWS env creds → runs the full
-  batch/upload/download/gc suite against a real endpoint (MinIO); otherwise
-  the test skips with a notice.
-  *Done when*: `cargo test -p git-cdc-server` passes without the env; passes
-  against MinIO when available (verified in smoke testing if docker/minio
-  exists locally).
+- [ ] **2.1** CLI `Remote` enum: `Http` (existing batch client) | `S3`
+  (`S3Store` + owned tokio runtime, `block_on` per op). Selection: if
+  `cdc.s3.bucket` is set → S3 (with `cdc.s3.prefix`, `cdc.s3.endpoint`,
+  `cdc.s3.force-path-style`); else `cdc.url` → HTTP; neither → error
+  naming both options.
+  *Done when*: `push`/`pull`/`gc` compile against `Remote` and the HTTP
+  path behaves exactly as before.
+- [ ] **2.2** S3 paths: push = bucket `list()` → set-diff → upload missing;
+  pull = `get` missing chunks; gc = `list()` + age-filtered `remove` of
+  non-live chunks, honoring `--dry-run`/`--grace-secs`.
+  *Done when*: exercised by the Phase 3 gated test / MinIO smoke.
 
-## Phase 3: Docs
+## Phase 3: Tests
 
 Depends on: Phase 2.
 
-- [ ] **3.1** README: S3 quick-start (server flags, MinIO example, cred
-  chain note); adjust "out of scope" list.
+- [ ] **3.1** Existing suites keep passing on disk/HTTP paths (regression
+  gate for both refactors).
+  *Done when*: `cargo test --workspace` green.
+- [ ] **3.2** Env-gated S3 test (`GIT_CDC_TEST_S3_ENDPOINT` + AWS env
+  creds): server-backend integration (batch/upload/download/gc against
+  the bucket) and a serverless CLI e2e (track→commit→push→clone→pull→gc,
+  no server). Skips with a notice when the env is absent; run against
+  MinIO in smoke testing if docker/minio is available.
+  *Done when*: `cargo test --workspace` passes without the env; both S3
+  suites pass against MinIO when available.
+
+## Phase 4: Docs
+
+Depends on: Phase 3.
+
+- [ ] **4.1** README: serverless quick-start (bucket config, cred chain),
+  server `--backend s3` flags, MinIO example; adjust "out of scope" list.
   *Done when*: README reflects reality.
 
 ## Verification
