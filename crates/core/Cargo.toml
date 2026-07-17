@@ -12,7 +12,6 @@ reqwest = { version = "0.13.4", features = ["blocking", "json"] }
 serde = { version = "1.0.228", features = ["derive"] }
 
 [dev-dependencies]
-assert_cmd = "2.2.2"
 axum = "0.8.9"
 git-cdc-server = { path = "../server" }
 tempfile = "3.27.0"

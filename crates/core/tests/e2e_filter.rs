@@ -108,6 +108,36 @@ fn smudge_with_empty_store_passes_manifest_through() {
 }
 
 #[test]
+fn diff_reports_changed_chunks() {
+    let dir = scratch_repo();
+    let repo = dir.path();
+
+    let mut data = test_data(20 * 1024 * 1024, 33);
+    fs::write(repo.join("asset.bin"), &data).unwrap();
+    git(repo, &["add", "."]);
+    git(repo, &["commit", "-q", "-m", "v1"]);
+    fs::write(repo.join("a.manifest"), git(repo, &["show", "HEAD:asset.bin"])).unwrap();
+
+    data[10_000_000] ^= 0xFF;
+    fs::write(repo.join("asset.bin"), &data).unwrap();
+    git(repo, &["add", "asset.bin"]);
+    git(repo, &["commit", "-q", "-m", "v2"]);
+    fs::write(repo.join("b.manifest"), git(repo, &["show", "HEAD:asset.bin"])).unwrap();
+
+    let out = Command::new(BIN)
+        .args(["diff", "a.manifest", "b.manifest"])
+        .current_dir(repo)
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        text.contains("added: 1 chunks") || text.contains("added: 2 chunks"),
+        "1-byte edit should change 1-2 chunks: {text}"
+    );
+}
+
+#[test]
 fn install_and_track_are_idempotent() {
     let dir = scratch_repo();
     let repo = dir.path();

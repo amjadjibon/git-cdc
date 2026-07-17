@@ -100,6 +100,18 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn file_exactly_max_chunk_size_round_trips() {
+        let data = test_data(MAX_SIZE as usize, 21);
+        let (chunks, oid, size) = chunk_all(&data);
+        assert_eq!(size, MAX_SIZE as u64);
+        assert_eq!(oid, blake3::hash(&data));
+        assert_eq!(
+            chunks.iter().map(|c| c.length as u64).sum::<u64>(),
+            MAX_SIZE as u64
+        );
+    }
+
+    #[test]
     fn file_smaller_than_min_is_one_chunk() {
         let data = test_data(1000, 7);
         let (chunks, _, size) = chunk_all(&data);
