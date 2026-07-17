@@ -1,5 +1,5 @@
 ---
-status: Planned
+status: Implemented
 version: 1.1
 date: 2026-07-17
 feature: s3-storage
@@ -42,18 +42,18 @@ Two consumers of one S3 store implementation (user decision: "both"):
 
 Depends on: nothing.
 
-- [ ] **1.1** `git-cdc-core::s3`: `S3Store` — `head_object` (has),
+- [x] **1.1** `git-cdc-core::s3`: `S3Store` — `head_object` (has),
   `put_object` (put, after hash verify), `get_object` (get, re-verify on
   read), paginated `list_objects_v2` (list with `LastModified`),
   `delete_object` (remove); plus a shared client builder (endpoint override,
   force-path-style, region fallback). Deps: `aws-sdk-s3`, `aws-config`,
   `tokio` (rt).
   *Done when*: `cargo build -p git-cdc-core` passes.
-- [ ] **1.2** Server `backend` module: `enum Backend { Disk(DiskStore),
+- [x] **1.2** Server `backend` module: `enum Backend { Disk(DiskStore),
   S3(S3Store) }` with async `has/put/get/remove/list`; GC's mtime logic
   moves behind `list()`. Rewire `AppState`/handlers.
   *Done when*: existing integration suite passes unchanged on the disk path.
-- [ ] **1.3** Server flags: `--backend disk|s3` (default disk; `--root`
+- [x] **1.3** Server flags: `--backend disk|s3` (default disk; `--root`
   required for disk, `--s3-bucket` required for s3 — enforced at startup,
   not first request), `--s3-prefix`, `--s3-endpoint`,
   `--s3-force-path-style`.
@@ -63,14 +63,14 @@ Depends on: nothing.
 
 Depends on: Phase 1.
 
-- [ ] **2.1** CLI `Remote` enum: `Http` (existing batch client) | `S3`
+- [x] **2.1** CLI `Remote` enum: `Http` (existing batch client) | `S3`
   (`S3Store` + owned tokio runtime, `block_on` per op). Selection: if
   `cdc.s3.bucket` is set → S3 (with `cdc.s3.prefix`, `cdc.s3.endpoint`,
   `cdc.s3.force-path-style`); else `cdc.url` → HTTP; neither → error
   naming both options.
   *Done when*: `push`/`pull`/`gc` compile against `Remote` and the HTTP
   path behaves exactly as before.
-- [ ] **2.2** S3 paths: push = bucket `list()` → set-diff → upload missing;
+- [x] **2.2** S3 paths: push = bucket `list()` → set-diff → upload missing;
   pull = `get` missing chunks; gc = `list()` + age-filtered `remove` of
   non-live chunks, honoring `--dry-run`/`--grace-secs`.
   *Done when*: exercised by the Phase 3 gated test / MinIO smoke.
@@ -79,10 +79,10 @@ Depends on: Phase 1.
 
 Depends on: Phase 2.
 
-- [ ] **3.1** Existing suites keep passing on disk/HTTP paths (regression
+- [x] **3.1** Existing suites keep passing on disk/HTTP paths (regression
   gate for both refactors).
   *Done when*: `cargo test --workspace` green.
-- [ ] **3.2** Env-gated S3 test (`GIT_CDC_TEST_S3_ENDPOINT` + AWS env
+- [x] **3.2** Env-gated S3 test (`GIT_CDC_TEST_S3_ENDPOINT` + AWS env
   creds): server-backend integration (batch/upload/download/gc against
   the bucket) and a serverless CLI e2e (track→commit→push→clone→pull→gc,
   no server). Skips with a notice when the env is absent; run against
@@ -94,7 +94,7 @@ Depends on: Phase 2.
 
 Depends on: Phase 3.
 
-- [ ] **4.1** README: serverless quick-start (bucket config, cred chain),
+- [x] **4.1** README: serverless quick-start (bucket config, cred chain),
   server `--backend s3` flags, MinIO example; adjust "out of scope" list.
   *Done when*: README reflects reality.
 
