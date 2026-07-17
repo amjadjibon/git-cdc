@@ -176,15 +176,19 @@ fn cmd_clean() -> Result<()> {
 }
 
 fn cmd_smudge() -> Result<()> {
-    let mut input = Vec::new();
-    std::io::stdin().lock().read_to_end(&mut input)?;
+    let mut reader = std::io::stdin().lock();
     let mut stdout = std::io::stdout().lock();
 
+    // Same 64-byte peek as clean: the passthrough case (file committed
+    // before tracking) can be arbitrarily large and must stream, not buffer.
+    let mut input = Vec::with_capacity(64);
+    (&mut reader).take(64).read_to_end(&mut input)?;
     if !is_manifest(&input) {
-        // Not ours (e.g. file committed before tracking) — pass through.
         stdout.write_all(&input)?;
+        std::io::copy(&mut reader, &mut stdout)?;
         return Ok(());
     }
+    reader.read_to_end(&mut input)?; // manifests are small
     let m = Manifest::parse(&input)?;
     let store = local_store()?;
 
