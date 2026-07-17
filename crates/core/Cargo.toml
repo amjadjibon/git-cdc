@@ -7,3 +7,6 @@ edition = "2021"
 anyhow = "1"
 blake3 = { version = "1", features = ["std"] }
 fastcdc = "4.0.1"
+
+[dev-dependencies]
+tempfile = "3.27.0"
