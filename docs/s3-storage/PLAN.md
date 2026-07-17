@@ -108,8 +108,8 @@ GIT_CDC_TEST_S3_ENDPOINT=... cargo test -p git-cdc-server  # S3 path, when avail
 
 ## Risks
 
-- `aws-sdk-s3` is a heavy dependency tree — server-crate only; the CLI/core
-  crate stays lean.
+- `aws-sdk-s3` is a heavy dependency tree — now in core too (serverless mode
+  needs it in the CLI); accepted in Assumptions when scope became "both".
 - S3 `LastModified` clock vs. server clock for GC grace — same accepted
   MVP caveat as disk mtime.
 - No S3 endpoint in the default test environment — mitigated by the
