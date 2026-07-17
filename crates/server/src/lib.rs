@@ -10,10 +10,12 @@ use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use git_cdc_core::manifest::parse_hash;
 use git_cdc_core::protocol::*;
-use git_cdc_core::store::{ChunkStore, DiskStore};
+
+pub mod backend;
+pub use backend::Backend;
 
 pub struct AppState {
-    pub store: DiskStore,
+    pub backend: Backend,
     pub token: String,
     pub grace: Duration,
 }
@@ -67,53 +69,54 @@ async fn batch(
             .into_response();
     }
 
-    let objects = req
-        .objects
-        .iter()
-        .map(|obj| {
-            let mut result = ObjectResult {
-                oid: obj.oid.clone(),
-                size: obj.size,
-                actions: None,
-                error: None,
-            };
-            let Ok(hash) = parse_hash(&obj.oid) else {
-                result.error = Some(ObjectError {
-                    code: 422,
-                    message: "invalid oid".into(),
+    let mut objects = Vec::with_capacity(req.objects.len());
+    for obj in &req.objects {
+        let mut result = ObjectResult {
+            oid: obj.oid.clone(),
+            size: obj.size,
+            actions: None,
+            error: None,
+        };
+        let Ok(hash) = parse_hash(&obj.oid) else {
+            result.error = Some(ObjectError {
+                code: 422,
+                message: "invalid oid".into(),
+            });
+            objects.push(result);
+            continue;
+        };
+        let present = match state.backend.has(&hash).await {
+            Ok(p) => p,
+            Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+        };
+        match req.operation {
+            // Present chunks get no actions — client skips them (the dedup win).
+            Operation::Upload if !present => {
+                result.actions = Some(Actions {
+                    upload: Some(Action {
+                        href: format!("/chunks/{}", obj.oid),
+                    }),
+                    download: None,
                 });
-                return result;
-            };
-            let present = state.store.has(&hash);
-            match req.operation {
-                // Present chunks get no actions — client skips them (the dedup win).
-                Operation::Upload if !present => {
-                    result.actions = Some(Actions {
-                        upload: Some(Action {
-                            href: format!("/chunks/{}", obj.oid),
-                        }),
-                        download: None,
-                    });
-                }
-                Operation::Download if present => {
-                    result.actions = Some(Actions {
-                        upload: None,
-                        download: Some(Action {
-                            href: format!("/chunks/{}", obj.oid),
-                        }),
-                    });
-                }
-                Operation::Download => {
-                    result.error = Some(ObjectError {
-                        code: 404,
-                        message: "chunk not found".into(),
-                    });
-                }
-                Operation::Upload => {}
             }
-            result
-        })
-        .collect();
+            Operation::Download if present => {
+                result.actions = Some(Actions {
+                    upload: None,
+                    download: Some(Action {
+                        href: format!("/chunks/{}", obj.oid),
+                    }),
+                });
+            }
+            Operation::Download => {
+                result.error = Some(ObjectError {
+                    code: 404,
+                    message: "chunk not found".into(),
+                });
+            }
+            Operation::Upload => {}
+        }
+        objects.push(result);
+    }
 
     Json(BatchResponse {
         transfer: TRANSFER_BASIC.into(),
@@ -137,7 +140,7 @@ async fn put_chunk(
         )
             .into_response();
     }
-    match state.store.put(&hash, &body) {
+    match state.backend.put(&hash, &body).await {
         Ok(()) => StatusCode::OK.into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
@@ -147,10 +150,12 @@ async fn get_chunk(State(state): State<Arc<AppState>>, Path(oid): Path<String>) 
     let Ok(hash) = parse_hash(&oid) else {
         return (StatusCode::UNPROCESSABLE_ENTITY, "invalid oid").into_response();
     };
-    if !state.store.has(&hash) {
-        return (StatusCode::NOT_FOUND, "chunk not found").into_response();
+    match state.backend.has(&hash).await {
+        Ok(false) => return (StatusCode::NOT_FOUND, "chunk not found").into_response(),
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+        Ok(true) => {}
     }
-    match state.store.get(&hash) {
+    match state.backend.get(&hash).await {
         Ok(data) => data.into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
@@ -172,7 +177,7 @@ async fn gc(State(state): State<Arc<AppState>>, Json(req): Json<GcRequest>) -> R
         }
     }
 
-    let all = match state.store.list() {
+    let all = match state.backend.list().await {
         Ok(all) => all,
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     };
@@ -183,21 +188,18 @@ async fn gc(State(state): State<Arc<AppState>>, Json(req): Json<GcRequest>) -> R
         kept_grace: 0,
     };
     let now = SystemTime::now();
-    for hash in all {
+    for (hash, modified) in all {
         if live.contains(&hash) {
             resp.kept_live += 1;
             continue;
         }
-        // ponytail: mtime-based grace assumes store host clock sanity —
-        // fine for MVP, revisit if stores ever span hosts.
-        let age = std::fs::metadata(state.store.path_for(&hash))
-            .and_then(|m| m.modified())
-            .ok()
-            .and_then(|mtime| now.duration_since(mtime).ok());
+        // ponytail: modified-time grace (disk mtime / S3 LastModified)
+        // assumes store clock sanity — fine for MVP.
+        let age = modified.and_then(|mtime| now.duration_since(mtime).ok());
         match age {
             Some(age) if age >= state.grace => {
                 if !req.dry_run {
-                    if let Err(e) = state.store.remove(&hash) {
+                    if let Err(e) = state.backend.remove(&hash).await {
                         return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
                             .into_response();
                     }

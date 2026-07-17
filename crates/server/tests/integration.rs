@@ -2,12 +2,12 @@ use std::time::Duration;
 
 use git_cdc_core::protocol::*;
 use git_cdc_core::store::DiskStore;
-use git_cdc_server::{app, AppState};
+use git_cdc_server::{app, AppState, Backend};
 
 async fn spawn_server(grace: Duration) -> (String, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
     let state = AppState {
-        store: DiskStore::new(dir.path().join("objects")),
+        backend: Backend::Disk(DiskStore::new(dir.path().join("objects"))),
         token: "test-token".into(),
         grace,
     };

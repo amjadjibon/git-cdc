@@ -8,7 +8,7 @@ use std::process::Command;
 use std::time::Duration;
 
 use git_cdc_core::store::DiskStore;
-use git_cdc_server::{app, AppState};
+use git_cdc_server::{app, AppState, Backend};
 
 const BIN: &str = env!("CARGO_BIN_EXE_git-cdc");
 const TOKEN: &str = "e2e-token";
@@ -24,7 +24,7 @@ fn spawn_server(root: PathBuf, grace: Duration) -> String {
             let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
             tx.send(format!("http://{}", listener.local_addr().unwrap())).unwrap();
             let state = AppState {
-                store: DiskStore::new(root),
+                backend: Backend::Disk(DiskStore::new(root)),
                 token: TOKEN.into(),
                 grace,
             };
