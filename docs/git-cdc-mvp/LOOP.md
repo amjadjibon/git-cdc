@@ -7,7 +7,7 @@ max_iterations: 3
 max_phases: 5
 max_agents: 3
 current_iteration: 2
-status: awaiting-approval
+status: complete
 last_review_base: 'bc1a4b3'
 ---
 
@@ -18,7 +18,7 @@ last_review_base: 'bc1a4b3'
 | Iter | Verdict | Crit | High | Med | Low | Mode | Action |
 |------|---------|------|------|-----|-----|------|--------|
 | 1    | Request Changes | 0 | 0 | 1 | 2 | lite | direct fix (MED-001) |
-| 2    | Approve | 0 | 0 | 0 | 2 | lite | clean exit — awaiting user approval |
+| 2    | Approve | 0 | 0 | 0 | 2 | lite | clean exit — approved |
 
 ## Stacked PRs
 
@@ -42,4 +42,4 @@ last_review_base: 'bc1a4b3'
 ### Iteration 2
 - [x] fix MED-001 (smudge streams passthrough)
 - [x] re-review → Approve (only Low/Info remain, accepted for MVP)
-- [x] decide → clean exit, awaiting user approval to push + PR
+- [x] decide → clean exit, approved, merged to main
