@@ -61,6 +61,35 @@ git add model.dat && git commit -m "add model"
 git push                        # pre-push hook uploads chunks first, automatically
 ```
 
+### Serverless mode (S3, no server)
+
+Skip the server entirely and let the CLI talk straight to an S3-compatible
+bucket (AWS S3, MinIO, R2) — credentials come from the standard AWS chain
+(env vars, `~/.aws`, IMDS), so IAM replaces the bearer token:
+
+```sh
+git cdc install
+git config cdc.s3.bucket my-chunks
+git config cdc.s3.prefix chunks/                       # optional
+git config cdc.s3.endpoint http://127.0.0.1:9000       # MinIO/R2 only
+git config cdc.s3.force-path-style true                # MinIO only
+git cdc track '*.dat'
+```
+
+`push`/`pull`/`gc` then negotiate against the bucket directly (one listing
+instead of a batch call). If `cdc.s3.bucket` is set it wins over `cdc.url`.
+
+### Server with S3 storage
+
+The server itself can also store chunks in a bucket instead of local disk —
+central token auth stays, S3 holds the bytes:
+
+```sh
+git-cdc-server --backend s3 --s3-bucket my-chunks \
+  --s3-endpoint http://127.0.0.1:9000 --s3-force-path-style \
+  --token <secret>
+```
+
 Cloning:
 
 ```sh
@@ -106,6 +135,16 @@ crates/
 cargo test --workspace   # unit + git-integration + full network e2e
 ```
 
-Design and plan documents live in [`docs/git-cdc-mvp/`](docs/git-cdc-mvp/).
-Out of scope for this MVP (see the plan): S3 backends, the git filter-process
-protocol, transfer adapters, SSH transport, and compression.
+S3 tests are env-gated (no bucket in the default environment) — run them
+against MinIO:
+
+```sh
+docker run -d --rm -p 9000:9000 minio/minio server /data
+GIT_CDC_TEST_S3_ENDPOINT=http://127.0.0.1:9000 \
+AWS_ACCESS_KEY_ID=minioadmin AWS_SECRET_ACCESS_KEY=minioadmin \
+cargo test --workspace
+```
+
+Design and plan documents live in [`docs/`](docs/). Out of scope so far
+(see the plans): the git filter-process protocol, transfer adapters /
+pre-signed URL offload, SSH transport, and compression.

@@ -214,12 +214,39 @@ fn cmd_smudge() -> Result<()> {
 
 // ---- sync: pull / push / gc ----------------------------------------------
 
-fn remote_client() -> Result<git_cdc_core::client::Client> {
-    let url = git_out(&["config", "--get", "cdc.url"])
-        .context("cdc.url is not configured; set it with `git config cdc.url <server>`")?;
+/// Where chunks live remotely: a git-cdc-server (batch API) or, serverless,
+/// an S3 bucket the CLI talks to directly with IAM credentials.
+enum Remote {
+    Http(git_cdc_core::client::Client),
+    S3 {
+        store: git_cdc_core::s3::S3Store,
+        rt: tokio::runtime::Runtime,
+    },
+}
+
+fn remote() -> Result<Remote> {
+    if let Ok(bucket) = git_out(&["config", "--get", "cdc.s3.bucket"]) {
+        let config = git_cdc_core::s3::S3Config {
+            bucket,
+            prefix: git_out(&["config", "--get", "cdc.s3.prefix"]).unwrap_or_default(),
+            endpoint: git_out(&["config", "--get", "cdc.s3.endpoint"]).ok(),
+            force_path_style: git_out(&["config", "--get", "cdc.s3.force-path-style"])
+                .map(|v| v == "true")
+                .unwrap_or(false),
+        };
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()?;
+        let store = rt.block_on(git_cdc_core::s3::S3Store::connect(&config));
+        return Ok(Remote::S3 { store, rt });
+    }
+    let url = git_out(&["config", "--get", "cdc.url"]).context(
+        "no remote configured; set cdc.url + cdc.token (server) \
+         or cdc.s3.bucket (serverless S3)",
+    )?;
     let token = git_out(&["config", "--get", "cdc.token"])
         .context("cdc.token is not configured; set it with `git config cdc.token <token>`")?;
-    Ok(git_cdc_core::client::Client::new(&url, &token))
+    Ok(Remote::Http(git_cdc_core::client::Client::new(&url, &token)))
 }
 
 fn oid_str(hash: &blake3::Hash) -> String {
@@ -315,7 +342,6 @@ fn index_manifests() -> Result<Vec<(String, Manifest)>> {
 
 fn cmd_push() -> Result<()> {
     let store = local_store()?;
-    let client = remote_client()?;
 
     let mut chunks: std::collections::HashMap<blake3::Hash, u64> = Default::default();
     for m in all_manifests()? {
@@ -327,29 +353,50 @@ fn cmd_push() -> Result<()> {
         eprintln!("git-cdc: no manifests found, nothing to push");
         return Ok(());
     }
+    let total = chunks.len();
 
-    let objects: Vec<ObjectSpec> = chunks
-        .iter()
-        .map(|(h, size)| ObjectSpec { oid: oid_str(h), size: *size })
-        .collect();
-    let total = objects.len();
-    let resp = client.batch(Operation::Upload, objects)?;
-
-    let mut uploaded = 0usize;
-    for obj in &resp.objects {
-        let Some(action) = obj.actions.as_ref().and_then(|a| a.upload.as_ref()) else {
-            continue; // server already has it — the dedup win
-        };
-        let hash = git_cdc_core::manifest::parse_hash(&obj.oid)?;
-        let data = store.get(&hash).with_context(|| {
-            format!("server wants {} but it is not in the local store — run `git cdc pull` first", obj.oid)
-        })?;
-        // ponytail: sequential uploads; add bounded concurrency when a real
-        // repo shows transfer time dominated by round-trips.
-        client.upload(&action.href, data)?;
-        uploaded += 1;
-    }
-    eprintln!("git-cdc: pushed {uploaded} of {total} chunks ({} already on server)", total - uploaded);
+    let uploaded = match remote()? {
+        Remote::Http(client) => {
+            let objects: Vec<ObjectSpec> = chunks
+                .iter()
+                .map(|(h, size)| ObjectSpec { oid: oid_str(h), size: *size })
+                .collect();
+            let resp = client.batch(Operation::Upload, objects)?;
+            let mut uploaded = 0usize;
+            for obj in &resp.objects {
+                let Some(action) = obj.actions.as_ref().and_then(|a| a.upload.as_ref()) else {
+                    continue; // server already has it — the dedup win
+                };
+                let hash = git_cdc_core::manifest::parse_hash(&obj.oid)?;
+                let data = store.get(&hash).with_context(|| {
+                    format!("server wants {} but it is not in the local store — run `git cdc pull` first", obj.oid)
+                })?;
+                // ponytail: sequential uploads; add bounded concurrency when
+                // a real repo shows transfer time dominated by round-trips.
+                client.upload(&action.href, data)?;
+                uploaded += 1;
+            }
+            uploaded
+        }
+        Remote::S3 { store: s3, rt } => rt.block_on(async {
+            // One paginated listing beats a HeadObject per chunk.
+            let present: std::collections::HashSet<blake3::Hash> =
+                s3.list().await?.into_iter().map(|(h, _)| h).collect();
+            let mut uploaded = 0usize;
+            for hash in chunks.keys() {
+                if present.contains(hash) {
+                    continue;
+                }
+                let data = store.get(hash).with_context(|| {
+                    format!("bucket needs {} but it is not in the local store — run `git cdc pull` first", oid_str(hash))
+                })?;
+                s3.put(hash, &data).await?;
+                uploaded += 1;
+            }
+            anyhow::Ok(uploaded)
+        })?,
+    };
+    eprintln!("git-cdc: pushed {uploaded} of {total} chunks ({} already remote)", total - uploaded);
     Ok(())
 }
 
@@ -372,27 +419,37 @@ fn cmd_pull() -> Result<()> {
         }
     }
     if !missing.is_empty() {
-        let client = remote_client()?;
-        let objects = missing
-            .iter()
-            .map(|(h, size)| ObjectSpec { oid: oid_str(h), size: *size })
-            .collect();
-        let resp = client.batch(Operation::Download, objects)?;
-        for obj in &resp.objects {
-            if let Some(err) = &obj.error {
-                bail!("server cannot provide {}: {} {}", obj.oid, err.code, err.message);
+        match remote()? {
+            Remote::Http(client) => {
+                let objects = missing
+                    .iter()
+                    .map(|(h, size)| ObjectSpec { oid: oid_str(h), size: *size })
+                    .collect();
+                let resp = client.batch(Operation::Download, objects)?;
+                for obj in &resp.objects {
+                    if let Some(err) = &obj.error {
+                        bail!("server cannot provide {}: {} {}", obj.oid, err.code, err.message);
+                    }
+                    let href = &obj
+                        .actions
+                        .as_ref()
+                        .and_then(|a| a.download.as_ref())
+                        .with_context(|| format!("no download action for {}", obj.oid))?
+                        .href;
+                    let hash = git_cdc_core::manifest::parse_hash(&obj.oid)?;
+                    let data = client.download(href)?;
+                    store.put(&hash, &data)?; // verifies hash before admitting
+                }
             }
-            let href = &obj
-                .actions
-                .as_ref()
-                .and_then(|a| a.download.as_ref())
-                .with_context(|| format!("no download action for {}", obj.oid))?
-                .href;
-            let hash = git_cdc_core::manifest::parse_hash(&obj.oid)?;
-            let data = client.download(href)?;
-            store.put(&hash, &data)?; // verifies hash before admitting
+            Remote::S3 { store: s3, rt } => rt.block_on(async {
+                for hash in missing.keys() {
+                    let data = s3.get(hash).await?; // verifies hash on read
+                    store.put(hash, &data)?;
+                }
+                anyhow::Ok(())
+            })?,
         }
-        eprintln!("git-cdc: fetched {} chunks", resp.objects.len());
+        eprintln!("git-cdc: fetched {} chunks", missing.len());
     }
 
     // Materialize worktree files still in passed-through-manifest state.
@@ -453,9 +510,10 @@ fn cmd_gc(dry_run: bool, grace_secs: u64) -> Result<()> {
     eprintln!("git-cdc: local gc {} {swept} unreferenced chunks ({} live)",
         if dry_run { "would remove" } else { "removed" }, live.len());
 
-    // Remote sweep, if a server is configured.
-    match remote_client() {
-        Ok(client) => {
+    // Remote sweep, if a remote is configured.
+    match remote() {
+        Ok(Remote::Http(client)) => {
+            // Server owns the remote grace period (its --grace-secs).
             let resp = client.gc(live.iter().map(oid_str).collect(), dry_run)?;
             eprintln!(
                 "git-cdc: remote gc {} {} chunks ({} live, {} in grace period)",
@@ -465,7 +523,35 @@ fn cmd_gc(dry_run: bool, grace_secs: u64) -> Result<()> {
                 resp.kept_grace
             );
         }
-        Err(_) => eprintln!("git-cdc: cdc.url not configured, skipped remote gc"),
+        Ok(Remote::S3 { store: s3, rt }) => {
+            // Serverless: no server to own the sweep — the CLI's grace applies.
+            let (deleted, kept_live, kept_grace) = rt.block_on(async {
+                let (mut deleted, mut kept_live, mut kept_grace) = (0usize, 0usize, 0usize);
+                for (hash, modified) in s3.list().await? {
+                    if live.contains(&hash) {
+                        kept_live += 1;
+                        continue;
+                    }
+                    let old_enough = modified
+                        .and_then(|mtime| now.duration_since(mtime).ok())
+                        .is_some_and(|age| age >= grace);
+                    if !old_enough {
+                        kept_grace += 1;
+                        continue;
+                    }
+                    if !dry_run {
+                        s3.remove(&hash).await?;
+                    }
+                    deleted += 1;
+                }
+                anyhow::Ok((deleted, kept_live, kept_grace))
+            })?;
+            eprintln!(
+                "git-cdc: bucket gc {} {deleted} chunks ({kept_live} live, {kept_grace} in grace period)",
+                if dry_run { "would remove" } else { "removed" },
+            );
+        }
+        Err(_) => eprintln!("git-cdc: no remote configured, skipped remote gc"),
     }
     Ok(())
 }
