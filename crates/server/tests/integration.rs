@@ -155,6 +155,32 @@ async fn wrong_hash_algo_is_rejected() {
 }
 
 #[tokio::test]
+async fn chunks_above_old_default_max_are_accepted() {
+    // Clients may configure chunk max up to the 16 MiB protocol ceiling; the
+    // body limit must not be sized off the 8 MiB client default.
+    let (base, _dir) = spawn_server(Duration::from_secs(3600)).await;
+    let c = client();
+    let big = vec![0xA5u8; 12 * 1024 * 1024];
+    let r = c
+        .put(format!("{base}/chunks/{}", oid(&big)))
+        .body(big.clone())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200);
+
+    // Above the ceiling is a protocol violation: 413.
+    let over = vec![0x5Au8; 17 * 1024 * 1024];
+    let r = c
+        .put(format!("{base}/chunks/{}", oid(&over)))
+        .body(over)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 413);
+}
+
+#[tokio::test]
 async fn gc_deletes_orphans_past_grace_only() {
     // Zero grace so orphans are immediately eligible.
     let (base, _dir) = spawn_server(Duration::ZERO).await;
