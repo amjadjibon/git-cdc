@@ -25,18 +25,18 @@ existing data is unaffected (RESEARCH FIND-004).
 
 ## Phase 1: core — ChunkParams
 
-- [ ] **1.1** `chunker::ChunkParams { min: u32, avg: u32, max: u32 }` with
+- [x] **1.1** `chunker::ChunkParams { min: u32, avg: u32, max: u32 }` with
   `Default` = current constants; `validate()` checking fastcdc hard bounds +
   ordering, error names the bad key/value. `chunk_stream` gains a
   `params: ChunkParams` argument (callers updated).
   *Done when*: `cargo test -p git-cdc-core` passes with defaults.
-- [ ] **1.2** `Manifest::new` takes `ChunkParams` and records it in the
+- [x] **1.2** `Manifest::new` takes `ChunkParams` and records it in the
   header fields.
   *Done when*: manifest round-trip tests pass.
 
 ## Phase 2: CLI — read gitconfig
 
-- [ ] **2.1** `cmd_clean` reads `cdc.chunk.{min,avg,max}` with
+- [x] **2.1** `cmd_clean` reads `cdc.chunk.{min,avg,max}` with
   `git config --type=int` (each optional, defaulting per-key), validates via
   `ChunkParams::validate`, and chunks with the result. Invalid config is a
   hard error (never silently chunk with wrong params).
@@ -45,18 +45,18 @@ existing data is unaffected (RESEARCH FIND-004).
 
 ## Phase 3: server — protocol ceiling
 
-- [ ] **3.1** Body limit becomes fastcdc's 16 MiB `MAXIMUM_MAX` + 4096
+- [x] **3.1** Body limit becomes fastcdc's 16 MiB `MAXIMUM_MAX` + 4096
   (protocol ceiling), decoupled from the client default.
   *Done when*: existing integration tests pass; a >8 MiB chunk upload is
   accepted.
 
 ## Phase 4: tests + docs
 
-- [ ] **4.1** Unit: validate() accepts defaults/bounds, rejects out-of-range
+- [x] **4.1** Unit: validate() accepts defaults/bounds, rejects out-of-range
   and misordered values. E2E: repo with `cdc.chunk.min=64k, avg=256k,
   max=1m` commits a 4 MiB file → more chunks than default config would give,
   all ≤ 1 MiB, manifest headers show the configured values.
-- [ ] **4.2** README: config table entry + caveat (same config for all
+- [x] **4.2** README: config table entry + caveat (same config for all
   clients of a repo); spec doc note that header values echo the writer's
   config.
 

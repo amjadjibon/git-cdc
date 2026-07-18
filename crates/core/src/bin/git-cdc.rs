@@ -5,7 +5,7 @@ use std::process::Command as Git;
 
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
-use git_cdc_core::chunker::chunk_stream;
+use git_cdc_core::chunker::{chunk_stream, ChunkParams};
 use git_cdc_core::manifest::{is_manifest, Manifest};
 use git_cdc_core::protocol::{ObjectSpec, Operation};
 use git_cdc_core::store::{ChunkStore, DiskStore};
@@ -87,6 +87,27 @@ fn local_store() -> Result<DiskStore> {
     Ok(DiskStore::new(git_dir()?.join("cdc").join("objects")))
 }
 
+/// `cdc.chunk.{min,avg,max}` from git config, defaults where unset.
+/// `--type=int` expands git's k/m/g suffixes ("512k" → 524288).
+fn chunk_params() -> Result<ChunkParams> {
+    let get = |key: &str, default: u32| -> Result<u32> {
+        if git_out(&["config", "--get", key]).is_err() {
+            return Ok(default); // unset — a malformed value must NOT land here
+        }
+        let v = git_out(&["config", "--type=int", "--get", key])?;
+        v.parse::<u64>().ok()
+            .and_then(|v| u32::try_from(v).ok())
+            .with_context(|| format!("{key} = {v:?} is not a valid size"))
+    };
+    use git_cdc_core::chunker::{AVG_SIZE, MAX_SIZE, MIN_SIZE};
+    ChunkParams {
+        min: get("cdc.chunk.min", MIN_SIZE)?,
+        avg: get("cdc.chunk.avg", AVG_SIZE)?,
+        max: get("cdc.chunk.max", MAX_SIZE)?,
+    }
+    .validate()
+}
+
 const HOOK_MARKER: &str = "git cdc push";
 
 fn cmd_install(global: bool) -> Result<()> {
@@ -162,10 +183,11 @@ fn cmd_clean() -> Result<()> {
         return Ok(());
     }
 
+    let params = chunk_params()?;
     let store = local_store()?;
     let input = head.as_slice().chain(reader);
-    let (chunks, oid, size) = chunk_stream(input, |c, bytes| store.put(&c.hash, bytes))?;
-    stdout.write_all(Manifest::new(oid, size, chunks).encode().as_bytes())?;
+    let (chunks, oid, size) = chunk_stream(input, params, |c, bytes| store.put(&c.hash, bytes))?;
+    stdout.write_all(Manifest::new(oid, size, chunks, params).encode().as_bytes())?;
     Ok(())
 }
 

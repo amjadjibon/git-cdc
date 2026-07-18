@@ -3,7 +3,7 @@ use std::fmt::Write as _;
 
 use anyhow::{bail, Context, Result};
 
-use crate::chunker::{Chunk, AVG_SIZE, MAX_SIZE, MIN_SIZE};
+use crate::chunker::{Chunk, ChunkParams};
 
 /// Normative manifest spec: docs/spec/manifest.md. LFS-pointer-style discipline:
 /// UTF-8, LF only, `{key} {value}` lines, `version` first, remaining header
@@ -34,13 +34,13 @@ pub fn is_manifest(data: &[u8]) -> bool {
 }
 
 impl Manifest {
-    pub fn new(oid: blake3::Hash, size: u64, chunks: Vec<Chunk>) -> Self {
+    pub fn new(oid: blake3::Hash, size: u64, chunks: Vec<Chunk>, params: ChunkParams) -> Self {
         Manifest {
             oid,
             size,
-            chunk_min: MIN_SIZE,
-            chunk_avg: AVG_SIZE,
-            chunk_max: MAX_SIZE,
+            chunk_min: params.min,
+            chunk_avg: params.avg,
+            chunk_max: params.max,
             extra: BTreeMap::new(),
             chunks,
         }
@@ -171,7 +171,7 @@ mod tests {
             offset: 0,
             length: data.len() as u32,
         };
-        Manifest::new(blake3::hash(data), data.len() as u64, vec![chunk])
+        Manifest::new(blake3::hash(data), data.len() as u64, vec![chunk], ChunkParams::default())
     }
 
     #[test]
@@ -211,7 +211,7 @@ mod tests {
 
     #[test]
     fn empty_file_manifest_round_trips() {
-        let m = Manifest::new(blake3::hash(&[]), 0, vec![]);
+        let m = Manifest::new(blake3::hash(&[]), 0, vec![], ChunkParams::default());
         assert_eq!(Manifest::parse(m.encode().as_bytes()).unwrap(), m);
     }
 
@@ -258,13 +258,13 @@ mod tests {
         let data = crate::chunker::tests::test_data(5 * 1024 * 1024, 3);
         let mut store: std::collections::HashMap<blake3::Hash, Vec<u8>> =
             std::collections::HashMap::new();
-        let (chunks, oid, size) = crate::chunker::chunk_stream(&data[..], |c, bytes| {
+        let (chunks, oid, size) = crate::chunker::chunk_stream(&data[..], ChunkParams::default(), |c, bytes| {
             store.insert(c.hash, bytes.to_vec());
             Ok(())
         })
         .unwrap();
 
-        let m = Manifest::parse(Manifest::new(oid, size, chunks).encode().as_bytes()).unwrap();
+        let m = Manifest::parse(Manifest::new(oid, size, chunks, ChunkParams::default()).encode().as_bytes()).unwrap();
         let mut rebuilt = Vec::with_capacity(m.size as usize);
         for c in &m.chunks {
             rebuilt.extend_from_slice(&store[&c.hash]);

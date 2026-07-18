@@ -17,7 +17,7 @@ fn git(repo: &Path, args: &[&str]) -> String {
     // Hooks invoke `git cdc push` via $PATH — put the freshly built binary first.
     let bin_dir = Path::new(BIN).parent().unwrap();
     let path = format!("{}:{}", bin_dir.display(), std::env::var("PATH").unwrap());
-    let out = Command::new("git")
+    let out = Command::new("git").env("GIT_CONFIG_GLOBAL", "/dev/null").env("GIT_CONFIG_SYSTEM", "/dev/null")
         .args(args)
         .current_dir(repo)
         .env("PATH", path)
@@ -32,7 +32,7 @@ fn git(repo: &Path, args: &[&str]) -> String {
 }
 
 fn cdc(repo: &Path, args: &[&str]) -> String {
-    let out = Command::new(BIN).args(args).current_dir(repo).output().unwrap();
+    let out = Command::new(BIN).env("GIT_CONFIG_GLOBAL", "/dev/null").env("GIT_CONFIG_SYSTEM", "/dev/null").args(args).current_dir(repo).output().unwrap();
     assert!(
         out.status.success(),
         "git-cdc {args:?} failed: {}",
