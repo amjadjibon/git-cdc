@@ -102,6 +102,23 @@ git config cdc.token <secret>
 git cdc pull                    # fetch chunks, materialize tracked files
 ```
 
+### Global setup with an include file
+
+[`.gitconfig.cdc`](.gitconfig.cdc) in this repo is a commented sample of
+every git-cdc setting. Point your global gitconfig at a copy of it:
+
+```sh
+cp .gitconfig.cdc ~/.gitconfig.cdc
+git config --global include.path ~/.gitconfig.cdc
+```
+
+Then uncomment/edit the sections you need in `~/.gitconfig.cdc` — the filter
+registration is safe to keep global (it only activates for tracked paths);
+remote and chunk settings are better kept repo-local unless all your repos
+share one chunk server or bucket. Per-repo `git config` values override the
+included globals. `git cdc install` is still needed once per repo for the
+pre-push hook.
+
 ### Chunk size tuning
 
 FastCDC bounds are configurable per repo (defaults: 512 KiB / 2 MiB / 8 MiB).
