@@ -6,7 +6,7 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-use git_cdc_core::s3::{make_client, S3Config, S3Store};
+use git_cdc_core::store::s3::{make_client, S3Config, S3Store};
 
 const BIN: &str = env!("CARGO_BIN_EXE_git-cdc");
 const BUCKET: &str = "git-cdc-test-serverless";

@@ -3,15 +3,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 
-/// Content-addressable chunk storage. Deliberately just has/put/get —
-/// refcounting was dropped per PLAN-REVIEW; GC is mark-and-sweep.
-pub trait ChunkStore {
-    fn has(&self, hash: &blake3::Hash) -> bool;
-    /// Verifies `blake3(data) == hash` before admitting — this is also the
-    /// server's upload-poisoning guard.
-    fn put(&self, hash: &blake3::Hash, data: &[u8]) -> Result<()>;
-    fn get(&self, hash: &blake3::Hash) -> Result<Vec<u8>>;
-}
+use super::ChunkStore;
 
 /// Sharded on-disk CAS: `<root>/<hex[0..2]>/<hex[2..4]>/<hex>`.
 pub struct DiskStore {

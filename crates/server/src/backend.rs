@@ -1,7 +1,7 @@
 use std::time::SystemTime;
 
 use anyhow::Result;
-use git_cdc_core::s3::S3Store;
+use git_cdc_core::store::s3::S3Store;
 use git_cdc_core::store::{ChunkStore, DiskStore};
 
 /// Server-side chunk storage. Two variants with one call site each — an

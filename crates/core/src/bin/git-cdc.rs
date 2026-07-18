@@ -211,14 +211,14 @@ fn cmd_smudge() -> Result<()> {
 enum Remote {
     Http(git_cdc_core::client::Client),
     S3 {
-        store: git_cdc_core::s3::S3Store,
+        store: git_cdc_core::store::s3::S3Store,
         rt: tokio::runtime::Runtime,
     },
 }
 
 fn remote() -> Result<Remote> {
     if let Ok(bucket) = git_out(&["config", "--get", "cdc.s3.bucket"]) {
-        let config = git_cdc_core::s3::S3Config {
+        let config = git_cdc_core::store::s3::S3Config {
             bucket,
             prefix: git_out(&["config", "--get", "cdc.s3.prefix"]).unwrap_or_default(),
             endpoint: git_out(&["config", "--get", "cdc.s3.endpoint"]).ok(),
@@ -229,7 +229,7 @@ fn remote() -> Result<Remote> {
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()?;
-        let store = rt.block_on(git_cdc_core::s3::S3Store::connect(&config));
+        let store = rt.block_on(git_cdc_core::store::s3::S3Store::connect(&config));
         return Ok(Remote::S3 { store, rt });
     }
     let url = git_out(&["config", "--get", "cdc.url"]).context(

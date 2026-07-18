@@ -10,7 +10,7 @@
 
 use std::time::Duration;
 
-use git_cdc_core::s3::{make_client, S3Config, S3Store};
+use git_cdc_core::store::s3::{make_client, S3Config, S3Store};
 
 fn test_config(bucket: &str) -> Option<S3Config> {
     let endpoint = std::env::var("GIT_CDC_TEST_S3_ENDPOINT").ok()?;

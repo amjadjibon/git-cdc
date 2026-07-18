@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use anyhow::bail;
 use clap::{Parser, ValueEnum};
-use git_cdc_core::s3::{S3Config, S3Store};
+use git_cdc_core::store::s3::{S3Config, S3Store};
 use git_cdc_core::store::DiskStore;
 use git_cdc_server::{app, AppState, Backend};
 
