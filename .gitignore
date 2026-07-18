@@ -2,3 +2,4 @@
 .worktrees/
 docs/book/book/
 dist/
+.zig-cache/
