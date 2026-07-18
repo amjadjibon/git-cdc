@@ -2,12 +2,16 @@
 date: 2026-07-18
 feature: workspace-qa
 coverage_before: 74.8%
-coverage_after: 77.1%
+coverage_after: 88.6%
 ---
 
 # QA Report: workspace test improvement
 
-Region coverage via `cargo llvm-cov --workspace` (line coverage: 77.4% → 79.6%).
+Region coverage via `cargo llvm-cov --workspace` (line coverage: 77.4% → 92.0%).
+
+**Update (same day):** the S3 suites now self-host an in-process s3s-fs
+server instead of being env-gated, so `cargo test --workspace` covers the S3
+paths by default. `GIT_CDC_TEST_S3_ENDPOINT` still overrides with a real S3.
 
 ## Coverage
 
@@ -18,10 +22,8 @@ Region coverage via `cargo llvm-cov --workspace` (line coverage: 77.4% → 79.6%
 | core/src/protocol.rs | untested | 100% |
 | core/src/store.rs | 93.0% | 94.2% |
 | server/src/main.rs | 0% | 51.3% |
-| core/src/s3.rs | 0%\* | 0%\* |
-| **TOTAL (regions)** | **74.8%** | **77.1%** |
-
-\* gated behind `GIT_CDC_TEST_S3_ENDPOINT`; MinIO was not running during this pass.
+| core/src/store/s3.rs | 0% | 89.3% |
+| **TOTAL (regions)** | **74.8%** | **88.6%** |
 
 ## Bug found and fixed
 
@@ -52,19 +54,16 @@ E2E:
 
 ## Remaining Gaps
 
-- `core/src/s3.rs` (0% in default runs) — covered only by the env-gated
-  `s3_backend.rs` + `e2e_serverless.rs` suites; needs MinIO
-  (`docker run … minio` + `GIT_CDC_TEST_S3_ENDPOINT`). Not runnable in this pass.
 - `core/src/client.rs` error branches (~27% of regions) — non-2xx `bail!` arms;
   server-side rejections are asserted in `server/tests/integration.rs`, the
   client-side message formatting is not worth a mock HTTP server.
-- `git-cdc.rs` remaining ~25% — mostly the S3 arms of push/pull/gc (same MinIO
-  gate as s3.rs) and untestable-in-process bits (stdin lock paths).
+- `git-cdc.rs` remaining ~13% — stdin lock paths and error arms not
+  reachable in-process.
 - `server/src/main.rs` runtime half — the `main()` body (socket bind, backend
   construction); exercised by manual smoke tests only.
 
 ## Manual Test Cases
 
-- [ ] Start MinIO and run both gated suites:
-  `GIT_CDC_TEST_S3_ENDPOINT=http://127.0.0.1:19000 AWS_ACCESS_KEY_ID=minioadmin AWS_SECRET_ACCESS_KEY=minioadmin cargo test --workspace`
-- [ ] `git-cdc-server --backend s3` end-to-end against MinIO (startup, batch, gc)
+- [ ] Run the S3 suites against a real store once per release:
+  `GIT_CDC_TEST_S3_ENDPOINT=… + AWS creds, cargo test --workspace`
+- [ ] `git-cdc-server --backend s3` end-to-end against MinIO/RustFS (startup, batch, gc)

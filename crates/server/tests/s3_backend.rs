@@ -1,25 +1,20 @@
-//! S3 backend integration (PLAN 3.2), env-gated: no S3 in the default test
-//! environment. Run with MinIO:
-//!
-//! ```sh
-//! docker run -d -p 9000:9000 minio/minio server /data
-//! GIT_CDC_TEST_S3_ENDPOINT=http://127.0.0.1:9000 \
-//! AWS_ACCESS_KEY_ID=minioadmin AWS_SECRET_ACCESS_KEY=minioadmin \
-//! cargo test -p git-cdc-server --test s3_backend
-//! ```
+//! S3 backend integration (PLAN 3.2). Runs against an in-process s3s-fs
+//! server by default — no external S3 needed. Set GIT_CDC_TEST_S3_ENDPOINT
+//! (+ AWS env creds) to point it at a real MinIO/RustFS/S3 instead.
 
 use std::time::Duration;
 
 use git_cdc_core::store::s3::{make_client, S3Config, S3Store};
 
-fn test_config(bucket: &str) -> Option<S3Config> {
-    let endpoint = std::env::var("GIT_CDC_TEST_S3_ENDPOINT").ok()?;
-    Some(S3Config {
+mod s3_fixture;
+
+fn test_config(bucket: &str, endpoint: String) -> S3Config {
+    S3Config {
         bucket: bucket.into(),
         prefix: "chunks/".into(),
         endpoint: Some(endpoint),
         force_path_style: true,
-    })
+    }
 }
 
 async fn ensure_bucket(config: &S3Config) {
@@ -30,10 +25,8 @@ async fn ensure_bucket(config: &S3Config) {
 
 #[tokio::test]
 async fn s3_store_round_trip_and_gc_metadata() {
-    let Some(config) = test_config("git-cdc-test-backend") else {
-        eprintln!("skipped: set GIT_CDC_TEST_S3_ENDPOINT (+ AWS env creds) to run");
-        return;
-    };
+    let (endpoint, _s3_dir) = s3_fixture::endpoint();
+    let config = test_config("git-cdc-test-backend", endpoint);
     ensure_bucket(&config).await;
     let store = S3Store::connect(&config).await;
 

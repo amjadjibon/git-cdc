@@ -1,12 +1,14 @@
-//! Serverless S3 e2e (PLAN 3.2), env-gated: track → commit → push straight
-//! to a bucket (no server) → fresh clone → pull → gc. See s3_backend.rs for
-//! the MinIO invocation.
+//! Serverless S3 e2e (PLAN 3.2): track → commit → push straight to a bucket
+//! (no git-cdc server) → fresh clone → pull → gc. Self-hosts an in-process
+//! s3s-fs bucket; GIT_CDC_TEST_S3_ENDPOINT overrides with a real S3.
 
 use std::fs;
 use std::path::Path;
 use std::process::Command;
 
 use git_cdc_core::store::s3::{make_client, S3Config, S3Store};
+
+mod s3_fixture;
 
 const BIN: &str = env!("CARGO_BIN_EXE_git-cdc");
 const BUCKET: &str = "git-cdc-test-serverless";
@@ -65,10 +67,7 @@ fn test_data(len: usize, seed: u64) -> Vec<u8> {
 
 #[test]
 fn serverless_push_clone_pull_gc() {
-    let Ok(endpoint) = std::env::var("GIT_CDC_TEST_S3_ENDPOINT") else {
-        eprintln!("skipped: set GIT_CDC_TEST_S3_ENDPOINT (+ AWS env creds) to run");
-        return;
-    };
+    let (endpoint, _s3_dir) = s3_fixture::endpoint();
     let config = S3Config {
         bucket: BUCKET.into(),
         prefix: "chunks/".into(),

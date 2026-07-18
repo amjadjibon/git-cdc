@@ -134,16 +134,16 @@ crates/
 ## Development
 
 ```sh
-cargo test --workspace   # unit + git-integration + full network e2e
+cargo test --workspace   # unit + git-integration + network e2e + S3 e2e
 ```
 
-S3 tests are env-gated (no bucket in the default environment) — run them
-against MinIO:
+The S3 suites self-host an in-process S3 server ([s3s-fs](https://crates.io/crates/s3s-fs))
+— no docker or MinIO needed. To run them against a real S3-compatible store
+(MinIO, RustFS, AWS) instead:
 
 ```sh
-docker run -d --rm -p 9000:9000 minio/minio server /data
 GIT_CDC_TEST_S3_ENDPOINT=http://127.0.0.1:9000 \
-AWS_ACCESS_KEY_ID=minioadmin AWS_SECRET_ACCESS_KEY=minioadmin \
+AWS_ACCESS_KEY_ID=… AWS_SECRET_ACCESS_KEY=… \
 cargo test --workspace
 ```
 
