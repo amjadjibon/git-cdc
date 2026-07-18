@@ -93,6 +93,57 @@ fn server_chunk_count(server_root: &Path) -> usize {
 }
 
 #[test]
+fn push_with_missing_local_chunk_says_how_to_recover() {
+    let tmp = tempfile::tempdir().unwrap();
+    let url = spawn_server(tmp.path().join("server/objects"), Duration::ZERO);
+
+    let repo = tmp.path().join("repo");
+    fs::create_dir(&repo).unwrap();
+    git(&repo, &["init", "-q", "-b", "main"]);
+    setup_repo(&repo, &url);
+    cdc(&repo, &["track", "*.bin"]);
+    fs::write(repo.join("asset.bin"), test_data(2 * 1024 * 1024, 42)).unwrap();
+    git(&repo, &["add", "."]);
+    git(&repo, &["commit", "-q", "-m", "v1"]);
+
+    // History references chunks, but the local store is gone (e.g. a clone
+    // that never pulled) and the server never got them: push cannot invent
+    // the bytes — it must fail and name the fix.
+    fs::remove_dir_all(repo.join(".git/cdc")).unwrap();
+    let out = Command::new(BIN).args(["push"]).current_dir(&repo).output().unwrap();
+    assert!(!out.status.success(), "push cannot succeed without the chunk bytes");
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("git cdc pull"),
+        "error must tell the user how to recover: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
+fn sync_without_remote_config_names_both_options() {
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = tmp.path().join("repo");
+    fs::create_dir(&repo).unwrap();
+    git(&repo, &["init", "-q", "-b", "main"]);
+    git(&repo, &["config", "user.email", "test@example.com"]);
+    git(&repo, &["config", "user.name", "Test"]);
+    cdc(&repo, &["track", "*.bin"]);
+    git(&repo, &["config", "filter.cdc.clean", &format!("{BIN} clean")]);
+    git(&repo, &["config", "filter.cdc.smudge", &format!("{BIN} smudge")]);
+    fs::write(repo.join("asset.bin"), test_data(1024 * 1024, 7)).unwrap();
+    git(&repo, &["add", "."]);
+    git(&repo, &["commit", "-q", "-m", "v1"]);
+
+    let out = Command::new(BIN).args(["push"]).current_dir(&repo).output().unwrap();
+    assert!(!out.status.success());
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains("cdc.url") && err.contains("cdc.s3.bucket"),
+        "error must name both remote options: {err}"
+    );
+}
+
+#[test]
 fn full_push_clone_pull_gc_cycle() {
     let tmp = tempfile::tempdir().unwrap();
     let server_root = tmp.path().join("server");

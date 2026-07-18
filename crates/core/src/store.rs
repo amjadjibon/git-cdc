@@ -146,6 +146,20 @@ mod tests {
     }
 
     #[test]
+    fn list_skips_foreign_and_temp_files() {
+        let (_dir, s) = store();
+        let data = b"real chunk";
+        let hash = blake3::hash(data);
+        s.put(&hash, data).unwrap();
+        // A crashed put's leftover temp file and a stray file must not be
+        // reported as chunks (their names aren't valid blake3 hex).
+        let shard = s.path_for(&hash).parent().unwrap().to_path_buf();
+        fs::write(shard.join(".tmp-999-deadbeef"), b"partial").unwrap();
+        fs::write(shard.join("not-a-hash"), b"junk").unwrap();
+        assert_eq!(s.list().unwrap(), vec![hash]);
+    }
+
+    #[test]
     fn get_missing_chunk_errors() {
         let (_dir, s) = store();
         assert!(s.get(&blake3::hash(b"never stored")).is_err());

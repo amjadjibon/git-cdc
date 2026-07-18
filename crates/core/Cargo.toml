@@ -17,5 +17,6 @@ tokio = { version = "1.52.4", features = ["rt"] }
 [dev-dependencies]
 axum = "0.8.9"
 git-cdc-server = { path = "../server" }
+serde_json = "1.0.150"
 tempfile = "3.27.0"
 tokio = { version = "1.52.4", features = ["rt-multi-thread", "net", "macros"] }

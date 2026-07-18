@@ -82,6 +82,10 @@ impl Manifest {
             bail!("not a git-cdc manifest (missing version line)");
         }
         let text = std::str::from_utf8(data).context("manifest is not UTF-8")?;
+        // spec: LF only — lines() would silently strip a CR before each LF.
+        if text.contains('\r') {
+            bail!("manifest contains a carriage return (LF-only format)");
+        }
 
         let mut header: BTreeMap<String, String> = BTreeMap::new();
         let mut chunks: Vec<Chunk> = Vec::new();
@@ -223,6 +227,30 @@ mod tests {
         let m = sample();
         let tampered = m.encode().replace(&format!("size {}", m.size), "size 999999");
         assert!(Manifest::parse(tampered.as_bytes()).is_err());
+    }
+
+    #[test]
+    fn rejects_carriage_returns_anywhere() {
+        let crlf = sample().encode().replace('\n', "\r\n");
+        assert!(Manifest::parse(crlf.as_bytes()).is_err());
+        // LF version line but one CRLF chunk line — lines() would hide this.
+        let mixed = sample().encode().replacen("\nchunk ", "\r\nchunk ", 1);
+        assert!(Manifest::parse(mixed.as_bytes()).is_err());
+    }
+
+    #[test]
+    fn rejects_header_key_after_chunk_lines() {
+        let mut text = sample().encode();
+        text.push_str("zzz-late-key value\n");
+        assert!(Manifest::parse(text.as_bytes()).is_err());
+    }
+
+    #[test]
+    fn rejects_uppercase_and_underscore_keys() {
+        for bad in ["Size 5", "chunk_min 1"] {
+            let text = format!("{VERSION_LINE}\n{bad}\n");
+            assert!(Manifest::parse(text.as_bytes()).is_err(), "{bad:?} accepted");
+        }
     }
 
     #[test]

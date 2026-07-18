@@ -1224,6 +1224,7 @@ dependencies = [
  "git-cdc-server",
  "reqwest",
  "serde",
+ "serde_json",
  "tempfile",
  "tokio",
 ]
