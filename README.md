@@ -168,6 +168,16 @@ crates/
 - **Protocol**: Git-LFS-shaped batch API (`POST /objects/batch` with `hash_algo`, `ref`), `basic` HTTP transfer, static bearer auth.
 - **GC**: client-driven — the client enumerates every manifest reachable from any ref and sends the live set; the server deletes the rest after a grace period (default 24 h) that protects in-flight uploads.
 
+## Documentation
+
+The full user guide lives in [`docs/book/`](docs/book/) as an
+[mdBook](https://rust-lang.github.io/mdBook/):
+
+```sh
+cargo install mdbook
+mdbook serve docs/book        # http://localhost:3000
+```
+
 ## Development
 
 ```sh

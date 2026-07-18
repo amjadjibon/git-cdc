@@ -1,0 +1,10 @@
+[book]
+title = "The git-cdc Book"
+description = "Content-defined chunking for large files in git — a Git LFS alternative"
+authors = ["Amjad Hossain"]
+language = "en"
+src = "src"
+
+[output.html]
+default-theme = "rust"
+git-repository-url = "https://github.com/amjadjibon/git-cdc"
