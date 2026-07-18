@@ -181,6 +181,23 @@ async fn chunks_above_old_default_max_are_accepted() {
 }
 
 #[tokio::test]
+async fn gc_accepts_large_live_sets() {
+    // ~100k live oids is a >2 MB JSON body; /gc must share the raised body
+    // limit, not axum's 2 MB default (small-chunk configs make this routine).
+    let (base, _dir) = spawn_server(Duration::from_secs(3600)).await;
+    let live: Vec<String> = (0..100_000u32)
+        .map(|i| oid(&i.to_le_bytes()))
+        .collect();
+    let r = client()
+        .post(format!("{base}/gc"))
+        .json(&GcRequest { live_oids: live, dry_run: true })
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200);
+}
+
+#[tokio::test]
 async fn gc_deletes_orphans_past_grace_only() {
     // Zero grace so orphans are immediately eligible.
     let (base, _dir) = spawn_server(Duration::ZERO).await;
