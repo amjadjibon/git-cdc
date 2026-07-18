@@ -102,6 +102,43 @@ git config cdc.token <secret>
 git cdc pull                    # fetch chunks, materialize tracked files
 ```
 
+### Global setup with an include file
+
+[`.gitconfig.cdc`](.gitconfig.cdc) in this repo is a commented sample of
+every git-cdc setting. Point your global gitconfig at a copy of it:
+
+```sh
+cp .gitconfig.cdc ~/.gitconfig.cdc
+git config --global include.path ~/.gitconfig.cdc
+```
+
+Then uncomment/edit the sections you need in `~/.gitconfig.cdc` — the filter
+registration is safe to keep global (it only activates for tracked paths);
+remote and chunk settings are better kept repo-local unless all your repos
+share one chunk server or bucket. Per-repo `git config` values override the
+included globals. `git cdc install` is still needed once per repo for the
+pre-push hook.
+
+### Chunk size tuning
+
+FastCDC bounds are configurable per repo (defaults: 512 KiB / 2 MiB / 8 MiB).
+Smaller chunks dedup finer-grained edits at the cost of more objects; larger
+chunks mean fewer round-trips for huge, rarely-edited assets:
+
+```sh
+git config cdc.chunk.min 64k    # 64 B – 1 MiB
+git config cdc.chunk.avg 256k   # 256 B – 4 MiB
+git config cdc.chunk.max 1m     # 1 KiB – 16 MiB   (min ≤ avg ≤ max)
+```
+
+Values are bytes; git's `k`/`m`/`g` suffixes work. Out-of-range or misordered
+values fail the clean filter with an error naming the key. The settings apply
+when files are *chunked* (`git add`) — existing manifests are self-describing
+and stay valid, so changing them never breaks history. One caveat: all
+clients of a repo should use the same values, otherwise re-cleaning the same
+content on different machines produces different (equally valid) manifests,
+which shows up as spurious diffs. Set them repo-locally, not `--global`.
+
 A fresh clone always succeeds even before `git cdc pull` — tracked files hold
 the manifest text until chunks are fetched (same passthrough model as git-lfs
 pointers). git-cdc never emits wrong bytes: every chunk is hash-verified on

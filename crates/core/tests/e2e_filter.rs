@@ -8,7 +8,7 @@ use std::process::Command;
 const BIN: &str = env!("CARGO_BIN_EXE_git-cdc");
 
 fn git(repo: &Path, args: &[&str]) -> String {
-    let out = Command::new("git")
+    let out = Command::new("git").env("GIT_CONFIG_GLOBAL", "/dev/null").env("GIT_CONFIG_SYSTEM", "/dev/null")
         .args(args)
         .current_dir(repo)
         .output()
@@ -22,7 +22,7 @@ fn git(repo: &Path, args: &[&str]) -> String {
 }
 
 fn cdc(repo: &Path, args: &[&str]) {
-    let out = Command::new(BIN).args(args).current_dir(repo).output().unwrap();
+    let out = Command::new(BIN).env("GIT_CONFIG_GLOBAL", "/dev/null").env("GIT_CONFIG_SYSTEM", "/dev/null").args(args).current_dir(repo).output().unwrap();
     assert!(
         out.status.success(),
         "git-cdc {args:?} failed: {}",
@@ -124,7 +124,7 @@ fn diff_reports_changed_chunks() {
     git(repo, &["commit", "-q", "-m", "v2"]);
     fs::write(repo.join("b.manifest"), git(repo, &["show", "HEAD:asset.bin"])).unwrap();
 
-    let out = Command::new(BIN)
+    let out = Command::new(BIN).env("GIT_CONFIG_GLOBAL", "/dev/null").env("GIT_CONFIG_SYSTEM", "/dev/null")
         .args(["diff", "a.manifest", "b.manifest"])
         .current_dir(repo)
         .output()
@@ -134,6 +134,56 @@ fn diff_reports_changed_chunks() {
     assert!(
         text.contains("added: 1 chunks") || text.contains("added: 2 chunks"),
         "1-byte edit should change 1-2 chunks: {text}"
+    );
+}
+
+#[test]
+fn chunk_sizes_configurable_via_gitconfig() {
+    let dir = scratch_repo();
+    let repo = dir.path();
+    // git's --type=int suffixes: 64k/256k/1m.
+    git(repo, &["config", "cdc.chunk.min", "64k"]);
+    git(repo, &["config", "cdc.chunk.avg", "256k"]);
+    git(repo, &["config", "cdc.chunk.max", "1m"]);
+
+    let data = test_data(4 * 1024 * 1024, 3);
+    fs::write(repo.join("asset.bin"), &data).unwrap();
+    git(repo, &["add", ".gitattributes", "asset.bin"]);
+    git(repo, &["commit", "-q", "-m", "add asset"]);
+
+    // Manifest headers echo the configured values; chunks respect the max.
+    let blob = git(repo, &["show", "HEAD:asset.bin"]);
+    assert!(blob.contains("\nchunk-min 65536\n"), "{blob:.200}");
+    assert!(blob.contains("\nchunk-avg 262144\n"));
+    assert!(blob.contains("\nchunk-max 1048576\n"));
+    let chunk_lines = blob.lines().filter(|l| l.starts_with("chunk ")).count();
+    assert!(chunk_lines >= 4, "4 MiB at ≤1 MiB per chunk needs ≥4, got {chunk_lines}");
+
+    // Restore stays byte-identical with custom params.
+    fs::remove_file(repo.join("asset.bin")).unwrap();
+    git(repo, &["checkout", "--", "asset.bin"]);
+    assert_eq!(fs::read(repo.join("asset.bin")).unwrap(), data);
+}
+
+#[test]
+fn invalid_chunk_config_fails_the_add() {
+    let dir = scratch_repo();
+    let repo = dir.path();
+    git(repo, &["config", "cdc.chunk.min", "63"]); // below fastcdc's 64-byte floor
+
+    fs::write(repo.join("asset.bin"), test_data(1024, 1)).unwrap();
+    let out = Command::new("git").env("GIT_CONFIG_GLOBAL", "/dev/null").env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .args(["add", "asset.bin"])
+        .current_dir(repo)
+        .output()
+        .unwrap();
+    // Clean must hard-error (never chunk with unvalidated params); with the
+    // filter not `required`, git may still stage the raw file — the essential
+    // assertion is the loud complaint naming the key.
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains("cdc.chunk.min"),
+        "add must surface the invalid config: {err}"
     );
 }
 
@@ -159,7 +209,7 @@ fn smudge_never_emits_corrupt_data() {
     }
 
     fs::remove_file(repo.join("asset.bin")).unwrap();
-    let out = Command::new("git")
+    let out = Command::new("git").env("GIT_CONFIG_GLOBAL", "/dev/null").env("GIT_CONFIG_SYSTEM", "/dev/null")
         .args(["checkout", "--", "asset.bin"])
         .current_dir(repo)
         .output()
@@ -181,7 +231,7 @@ fn smudge_never_emits_corrupt_data() {
 #[test]
 fn track_without_patterns_errors() {
     let dir = scratch_repo();
-    let out = Command::new(BIN)
+    let out = Command::new(BIN).env("GIT_CONFIG_GLOBAL", "/dev/null").env("GIT_CONFIG_SYSTEM", "/dev/null")
         .args(["track"])
         .current_dir(dir.path())
         .output()
@@ -203,7 +253,7 @@ fn install_leaves_foreign_pre_push_hook_alone() {
     let foreign = "#!/bin/sh\necho my own hook\n";
     fs::write(&hook, foreign).unwrap();
 
-    let out = Command::new(BIN).args(["install"]).current_dir(repo).output().unwrap();
+    let out = Command::new(BIN).env("GIT_CONFIG_GLOBAL", "/dev/null").env("GIT_CONFIG_SYSTEM", "/dev/null").args(["install"]).current_dir(repo).output().unwrap();
     assert!(out.status.success());
     assert!(
         String::from_utf8_lossy(&out.stderr).contains("already exists"),

@@ -26,12 +26,14 @@ pub fn app(state: AppState) -> Router {
         .route("/healthz", get(|| async { "ok" }))
         .route("/objects/batch", post(batch))
         .route("/chunks/{oid}", put(put_chunk).get(get_chunk))
-        // Chunks are up to MAX_SIZE (8 MiB); axum's default 2 MB limit would
-        // reject them. Anything over the chunk bound is a protocol violation.
-        .layer(axum::extract::DefaultBodyLimit::max(
-            git_cdc_core::chunker::MAX_SIZE as usize + 4096,
-        ))
         .route("/gc", post(gc))
+        // Clients may configure chunk max up to fastcdc's ceiling (16 MiB);
+        // axum's default 2 MB limit would reject those uploads — and /gc must
+        // sit under this layer too: a live set of ~100k oids is a >2 MB JSON
+        // body. Anything over the ceiling is a protocol violation.
+        .layer(axum::extract::DefaultBodyLimit::max(
+            git_cdc_core::chunker::CEILING as usize + 4096,
+        ))
         .layer(middleware::from_fn_with_state(state.clone(), auth))
         .with_state(state)
 }

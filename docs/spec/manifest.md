@@ -57,9 +57,14 @@ parsers MUST preserve them verbatim so a rewrite by an older tool never
 drops fields added by a newer one (forward compatibility). Writers MUST
 emit them in the same sorted order as the required keys.
 
-The reference writer uses chunk-min 524288 (512 KiB), chunk-avg 2097152
-(2 MiB), chunk-max 8388608 (8 MiB); readers take the values from the
-manifest, not from constants.
+The reference writer defaults to chunk-min 524288 (512 KiB), chunk-avg
+2097152 (2 MiB), chunk-max 8388608 (8 MiB), overridable per repo via
+`cdc.chunk.{min,avg,max}` git config within FastCDC's hard bounds
+(min 64 B–1 MiB, avg 256 B–4 MiB, max 1 KiB–16 MiB, min ≤ avg ≤ max).
+The header echoes whatever the writer used; readers take the values from
+the manifest, not from constants — reassembly needs only the chunk list.
+No chunk may exceed 16777216 bytes (the protocol ceiling servers size
+their upload limits against).
 
 ## Chunk lines
 
