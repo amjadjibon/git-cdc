@@ -98,7 +98,7 @@ fn full_push_clone_pull_gc_cycle() {
     let server_root = tmp.path().join("server");
     let url = spawn_server(server_root.join("objects"), Duration::ZERO);
 
-    // --- origin repo with v1 and v2 of a 20 MiB file -----------------------
+    // origin repo with v1 and v2 of a 20 MiB file
     let repo = tmp.path().join("origin");
     fs::create_dir(&repo).unwrap();
     git(&repo, &["init", "-q", "-b", "main"]);
@@ -131,7 +131,7 @@ fn full_push_clone_pull_gc_cycle() {
         "1 KiB edit should upload only a few chunks, uploaded {new_chunks} ({log})"
     );
 
-    // --- pre-push hook guard ------------------------------------------------
+    // pre-push hook guard
     let remote = tmp.path().join("remote.git");
     git(tmp.path(), &["init", "-q", "--bare", &remote.to_string_lossy()]);
     git(&repo, &["remote", "add", "origin", &remote.to_string_lossy()]);
@@ -145,7 +145,7 @@ fn full_push_clone_pull_gc_cycle() {
     git(&repo, &["config", "cdc.url", &url]);
     git(&repo, &["push", "origin", "main"]);
 
-    // --- fresh clone: succeeds, passthrough, pull materializes -------------
+    // fresh clone: succeeds, passthrough, pull materializes
     let clone = tmp.path().join("clone");
     git(tmp.path(), &["clone", "-q", &remote.to_string_lossy(), &clone.to_string_lossy()]);
     setup_repo(&clone, &url);
@@ -171,7 +171,7 @@ fn full_push_clone_pull_gc_cycle() {
     assert_eq!(restored_v1, expected_v1, "v1 restores byte-identically");
     expected_v1.clear();
 
-    // --- gc: drop v2, its unique chunks become garbage ----------------------
+    // gc: drop v2, its unique chunks become garbage
     git(&repo, &["reset", "-q", "--hard", "HEAD~1"]);
     git(&repo, &["push", "-q", "--force", "origin", "main"]);
     let before = server_chunk_count(&server_root);

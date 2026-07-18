@@ -63,8 +63,6 @@ fn main() -> Result<()> {
     }
 }
 
-// ---- git plumbing -----------------------------------------------------
-
 fn git_out(args: &[&str]) -> Result<String> {
     let out = Git::new("git").args(args).output().context("running git")?;
     if !out.status.success() {
@@ -88,8 +86,6 @@ fn git_dir() -> Result<PathBuf> {
 fn local_store() -> Result<DiskStore> {
     Ok(DiskStore::new(git_dir()?.join("cdc").join("objects")))
 }
-
-// ---- install / track ---------------------------------------------------
 
 const HOOK_MARKER: &str = "git cdc push";
 
@@ -150,8 +146,6 @@ fn cmd_track(patterns: &[String]) -> Result<()> {
     Ok(())
 }
 
-// ---- clean / smudge ----------------------------------------------------
-
 fn cmd_clean() -> Result<()> {
     let stdin = std::io::stdin().lock();
     let mut stdout = std::io::stdout().lock();
@@ -211,8 +205,6 @@ fn cmd_smudge() -> Result<()> {
     }
     Ok(())
 }
-
-// ---- sync: pull / push / gc ----------------------------------------------
 
 /// Where chunks live remotely: a git-cdc-server (batch API) or, serverless,
 /// an S3 bucket the CLI talks to directly with IAM credentials.
@@ -555,8 +547,6 @@ fn cmd_gc(dry_run: bool, grace_secs: u64) -> Result<()> {
     }
     Ok(())
 }
-
-// ---- diff ----------------------------------------------------------------
 
 fn cmd_diff(from: &PathBuf, to: &PathBuf) -> Result<()> {
     let a = Manifest::parse(&fs::read(from)?)?;
