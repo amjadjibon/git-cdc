@@ -6,7 +6,7 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-use git_cdc_core::store::s3::{make_client, S3Config, S3Store};
+use git_cdc_core::store::s3::{S3Config, S3Store, make_client};
 
 mod s3_fixture;
 
@@ -17,7 +17,9 @@ fn git(repo: &Path, args: &[&str]) -> String {
     // Hooks invoke `git cdc push` via $PATH — put the freshly built binary first.
     let bin_dir = Path::new(BIN).parent().unwrap();
     let path = format!("{}:{}", bin_dir.display(), std::env::var("PATH").unwrap());
-    let out = Command::new("git").env("GIT_CONFIG_GLOBAL", "/dev/null").env("GIT_CONFIG_SYSTEM", "/dev/null")
+    let out = Command::new("git")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
         .args(args)
         .current_dir(repo)
         .env("PATH", path)
@@ -32,7 +34,13 @@ fn git(repo: &Path, args: &[&str]) -> String {
 }
 
 fn cdc(repo: &Path, args: &[&str]) -> String {
-    let out = Command::new(BIN).env("GIT_CONFIG_GLOBAL", "/dev/null").env("GIT_CONFIG_SYSTEM", "/dev/null").args(args).current_dir(repo).output().unwrap();
+    let out = Command::new(BIN)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .args(args)
+        .current_dir(repo)
+        .output()
+        .unwrap();
     assert!(
         out.status.success(),
         "git-cdc {args:?} failed: {}",
@@ -45,8 +53,14 @@ fn setup_repo(repo: &Path, endpoint: &str) {
     git(repo, &["config", "user.email", "test@example.com"]);
     git(repo, &["config", "user.name", "Test"]);
     cdc(repo, &["install"]);
-    git(repo, &["config", "filter.cdc.clean", &format!("{BIN} clean")]);
-    git(repo, &["config", "filter.cdc.smudge", &format!("{BIN} smudge")]);
+    git(
+        repo,
+        &["config", "filter.cdc.clean", &format!("{BIN} clean")],
+    );
+    git(
+        repo,
+        &["config", "filter.cdc.smudge", &format!("{BIN} smudge")],
+    );
     git(repo, &["config", "cdc.s3.bucket", BUCKET]);
     git(repo, &["config", "cdc.s3.prefix", "chunks/"]);
     git(repo, &["config", "cdc.s3.endpoint", endpoint]);
@@ -74,7 +88,10 @@ fn serverless_push_clone_pull_gc() {
         endpoint: Some(endpoint.clone()),
         force_path_style: true,
     };
-    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
     rt.block_on(async {
         let client = make_client(&config).await;
         let _ = client.create_bucket().bucket(BUCKET).send().await;
@@ -84,9 +101,8 @@ fn serverless_push_clone_pull_gc() {
             store.remove(&hash).await.unwrap();
         }
     });
-    let count_bucket = || {
-        rt.block_on(async { S3Store::connect(&config).await.list().await.unwrap().len() })
-    };
+    let count_bucket =
+        || rt.block_on(async { S3Store::connect(&config).await.list().await.unwrap().len() });
 
     let tmp = tempfile::tempdir().unwrap();
 
@@ -117,18 +133,38 @@ fn serverless_push_clone_pull_gc() {
 
     // fresh clone via bare remote: passthrough, then pull from the bucket.
     let remote = tmp.path().join("remote.git");
-    git(tmp.path(), &["init", "-q", "--bare", &remote.to_string_lossy()]);
-    git(&repo, &["remote", "add", "origin", &remote.to_string_lossy()]);
+    git(
+        tmp.path(),
+        &["init", "-q", "--bare", &remote.to_string_lossy()],
+    );
+    git(
+        &repo,
+        &["remote", "add", "origin", &remote.to_string_lossy()],
+    );
     git(&repo, &["push", "-q", "origin", "main"]);
 
     let clone = tmp.path().join("clone");
-    git(tmp.path(), &["clone", "-q", &remote.to_string_lossy(), &clone.to_string_lossy()]);
+    git(
+        tmp.path(),
+        &[
+            "clone",
+            "-q",
+            &remote.to_string_lossy(),
+            &clone.to_string_lossy(),
+        ],
+    );
     setup_repo(&clone, &endpoint);
-    assert!(fs::read(clone.join("asset.bin"))
-        .unwrap()
-        .starts_with(b"version git-cdc/spec/v1\n"));
+    assert!(
+        fs::read(clone.join("asset.bin"))
+            .unwrap()
+            .starts_with(b"version git-cdc/spec/v1\n")
+    );
     cdc(&clone, &["pull"]);
-    assert_eq!(fs::read(clone.join("asset.bin")).unwrap(), data, "v2 materialized from bucket");
+    assert_eq!(
+        fs::read(clone.join("asset.bin")).unwrap(),
+        data,
+        "v2 materialized from bucket"
+    );
 
     // gc: drop v2 everywhere (incl. the remote-tracking ref rev-list sees),
     // bucket sweep removes its unique chunks.

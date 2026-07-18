@@ -4,7 +4,7 @@
 
 use std::time::Duration;
 
-use git_cdc_core::store::s3::{make_client, S3Config, S3Store};
+use git_cdc_core::store::s3::{S3Config, S3Store, make_client};
 
 mod s3_fixture;
 
@@ -45,7 +45,10 @@ async fn s3_store_round_trip_and_gc_metadata() {
 
     // list sees the chunk with a LastModified age.
     let listed = store.list().await.unwrap();
-    let entry = listed.iter().find(|(h, _)| *h == hash).expect("chunk listed");
+    let entry = listed
+        .iter()
+        .find(|(h, _)| *h == hash)
+        .expect("chunk listed");
     let age = entry
         .1
         .and_then(|m| std::time::SystemTime::now().duration_since(m).ok())

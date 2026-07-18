@@ -1,6 +1,6 @@
 use std::io::Read;
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use fastcdc::v2020::StreamCDC;
 
 // DESIGN.md §4 default chunking parameters; override per repo with
@@ -24,7 +24,11 @@ pub struct ChunkParams {
 
 impl Default for ChunkParams {
     fn default() -> Self {
-        ChunkParams { min: MIN_SIZE, avg: AVG_SIZE, max: MAX_SIZE }
+        ChunkParams {
+            min: MIN_SIZE,
+            avg: AVG_SIZE,
+            max: MAX_SIZE,
+        }
     }
 }
 
@@ -32,7 +36,9 @@ impl ChunkParams {
     /// fastcdc only `debug_assert`s its bounds — a release build silently
     /// chunks wrong on out-of-range values, so enforce them here.
     pub fn validate(self) -> Result<Self> {
-        use fastcdc::v2020::{AVERAGE_MAX, AVERAGE_MIN, MAXIMUM_MAX, MAXIMUM_MIN, MINIMUM_MAX, MINIMUM_MIN};
+        use fastcdc::v2020::{
+            AVERAGE_MAX, AVERAGE_MIN, MAXIMUM_MAX, MAXIMUM_MIN, MINIMUM_MAX, MINIMUM_MIN,
+        };
         let ranges = [
             ("cdc.chunk.min", self.min as usize, MINIMUM_MIN, MINIMUM_MAX),
             ("cdc.chunk.avg", self.avg as usize, AVERAGE_MIN, AVERAGE_MAX),
@@ -46,7 +52,9 @@ impl ChunkParams {
         if !(self.min <= self.avg && self.avg <= self.max) {
             bail!(
                 "chunk sizes must satisfy min <= avg <= max, got {} / {} / {}",
-                self.min, self.avg, self.max
+                self.min,
+                self.avg,
+                self.max
             );
         }
         Ok(self)
@@ -74,7 +82,12 @@ pub fn chunk_stream<R: Read>(
     let mut file_hasher = blake3::Hasher::new();
     let mut size: u64 = 0;
 
-    for entry in StreamCDC::new(reader, params.min as usize, params.avg as usize, params.max as usize) {
+    for entry in StreamCDC::new(
+        reader,
+        params.min as usize,
+        params.avg as usize,
+        params.max as usize,
+    ) {
         let entry = entry?;
         let chunk = Chunk {
             hash: blake3::hash(&entry.data),
@@ -185,27 +198,70 @@ pub(crate) mod tests {
     fn params_validation() {
         assert!(ChunkParams::default().validate().is_ok());
         // fastcdc hard-bound edges are accepted…
-        assert!(ChunkParams { min: 64, avg: 256, max: 1024 }.validate().is_ok());
-        assert!(ChunkParams { min: 1 << 20, avg: 4 << 20, max: 16 << 20 }.validate().is_ok());
+        assert!(
+            ChunkParams {
+                min: 64,
+                avg: 256,
+                max: 1024
+            }
+            .validate()
+            .is_ok()
+        );
+        assert!(
+            ChunkParams {
+                min: 1 << 20,
+                avg: 4 << 20,
+                max: 16 << 20
+            }
+            .validate()
+            .is_ok()
+        );
         // …out-of-range values are rejected, naming the config key:
-        let err = ChunkParams { min: 63, ..Default::default() }.validate().unwrap_err();
+        let err = ChunkParams {
+            min: 63,
+            ..Default::default()
+        }
+        .validate()
+        .unwrap_err();
         assert!(err.to_string().contains("cdc.chunk.min"), "{err}");
-        let err = ChunkParams { max: (16 << 20) + 1, ..Default::default() }.validate().unwrap_err();
+        let err = ChunkParams {
+            max: (16 << 20) + 1,
+            ..Default::default()
+        }
+        .validate()
+        .unwrap_err();
         assert!(err.to_string().contains("cdc.chunk.max"), "{err}");
         // …and misordered sizes too:
-        let err = ChunkParams { min: 1 << 20, avg: 512 * 1024, max: 8 << 20 }.validate().unwrap_err();
+        let err = ChunkParams {
+            min: 1 << 20,
+            avg: 512 * 1024,
+            max: 8 << 20,
+        }
+        .validate()
+        .unwrap_err();
         assert!(err.to_string().contains("min <= avg <= max"), "{err}");
     }
 
     #[test]
     fn custom_params_change_chunking() {
         let data = test_data(4 * 1024 * 1024, 5);
-        let small = ChunkParams { min: 64 * 1024, avg: 256 * 1024, max: 1024 * 1024 };
+        let small = ChunkParams {
+            min: 64 * 1024,
+            avg: 256 * 1024,
+            max: 1024 * 1024,
+        };
         let (chunks, oid, _) = chunk_stream(&data[..], small, |_, _| Ok(())).unwrap();
         let (default_chunks, default_oid, _) = chunk_all(&data);
-        assert!(chunks.len() > default_chunks.len(), "smaller bounds → more chunks");
+        assert!(
+            chunks.len() > default_chunks.len(),
+            "smaller bounds → more chunks"
+        );
         for c in &chunks {
-            assert!(c.length <= small.max, "chunk above configured max: {}", c.length);
+            assert!(
+                c.length <= small.max,
+                "chunk above configured max: {}",
+                c.length
+            );
         }
         assert_eq!(oid, default_oid, "oid is chunking-independent");
     }
@@ -217,9 +273,11 @@ pub(crate) mod tests {
         data[10 * 1024 * 1024] ^= 0xFF; // 1-byte edit in the middle
         let (after, _, _) = chunk_all(&data);
 
-        let before_set: std::collections::HashSet<_> =
-            before.iter().map(|c| c.hash).collect();
-        let changed = after.iter().filter(|c| !before_set.contains(&c.hash)).count();
+        let before_set: std::collections::HashSet<_> = before.iter().map(|c| c.hash).collect();
+        let changed = after
+            .iter()
+            .filter(|c| !before_set.contains(&c.hash))
+            .count();
         assert!(changed <= 2, "1-byte edit changed {changed} chunks");
     }
 }

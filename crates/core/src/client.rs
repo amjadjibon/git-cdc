@@ -1,4 +1,4 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 
 use crate::protocol::*;
 
@@ -57,7 +57,11 @@ impl Client {
     }
 
     pub fn download(&self, href: &str) -> Result<Vec<u8>> {
-        let resp = self.http.get(self.url(href)).bearer_auth(&self.token).send()?;
+        let resp = self
+            .http
+            .get(self.url(href))
+            .bearer_auth(&self.token)
+            .send()?;
         if !resp.status().is_success() {
             bail!("chunk download failed: {} {}", resp.status(), resp.text()?);
         }

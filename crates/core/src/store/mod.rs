@@ -5,7 +5,7 @@ pub mod disk;
 pub mod s3;
 
 pub use disk::DiskStore;
-pub use s3::{make_client, S3Config, S3Store};
+pub use s3::{S3Config, S3Store, make_client};
 
 use anyhow::Result;
 

@@ -2,9 +2,9 @@ use std::time::Duration;
 
 use anyhow::bail;
 use clap::{Parser, ValueEnum};
-use git_cdc_core::store::s3::{S3Config, S3Store};
 use git_cdc_core::store::DiskStore;
-use git_cdc_server::{app, AppState, Backend};
+use git_cdc_core::store::s3::{S3Config, S3Store};
+use git_cdc_server::{AppState, Backend, app};
 
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
 enum BackendKind {
@@ -13,7 +13,10 @@ enum BackendKind {
 }
 
 #[derive(Parser)]
-#[command(name = "git-cdc-server", about = "git-cdc chunk CAS + batch API server")]
+#[command(
+    name = "git-cdc-server",
+    about = "git-cdc chunk CAS + batch API server"
+)]
 struct Args {
     /// Chunk storage backend
     #[arg(long, value_enum, default_value = "disk")]
@@ -44,35 +47,14 @@ struct Args {
     grace_secs: u64,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    // PLAN 1.3 done-when: backend/flag pairing is enforced at startup.
-    #[test]
-    fn s3_backend_requires_bucket() {
-        let r = Args::try_parse_from(["s", "--backend", "s3", "--token", "t"]);
-        assert!(r.is_err());
-        assert!(Args::try_parse_from(["s", "--backend", "s3", "--s3-bucket", "b", "--token", "t"]).is_ok());
-    }
-
-    #[test]
-    fn disk_backend_requires_root() {
-        assert!(Args::try_parse_from(["s", "--backend", "disk", "--token", "t"]).is_err());
-        assert!(Args::try_parse_from(["s", "--root", "/tmp/x", "--token", "t"]).is_ok());
-        // Defaulted backend skips clap's required_if_eq — main()'s runtime
-        // bail is the guard for the bare `--token t` invocation.
-        let bare = Args::try_parse_from(["s", "--token", "t"]).unwrap();
-        assert!(bare.root.is_none());
-    }
-}
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     let backend = match args.backend {
         BackendKind::Disk => {
-            let Some(root) = args.root else { bail!("--root is required for the disk backend") };
+            let Some(root) = args.root else {
+                bail!("--root is required for the disk backend")
+            };
             Backend::Disk(DiskStore::new(root))
         }
         BackendKind::S3 => {
@@ -99,4 +81,30 @@ async fn main() -> anyhow::Result<()> {
     eprintln!("git-cdc-server listening on {}", listener.local_addr()?);
     axum::serve(listener, app(state)).await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // PLAN 1.3 done-when: backend/flag pairing is enforced at startup.
+    #[test]
+    fn s3_backend_requires_bucket() {
+        let r = Args::try_parse_from(["s", "--backend", "s3", "--token", "t"]);
+        assert!(r.is_err());
+        assert!(
+            Args::try_parse_from(["s", "--backend", "s3", "--s3-bucket", "b", "--token", "t"])
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn disk_backend_requires_root() {
+        assert!(Args::try_parse_from(["s", "--backend", "disk", "--token", "t"]).is_err());
+        assert!(Args::try_parse_from(["s", "--root", "/tmp/x", "--token", "t"]).is_ok());
+        // Defaulted backend skips clap's required_if_eq — main()'s runtime
+        // bail is the guard for the bare `--token t` invocation.
+        let bare = Args::try_parse_from(["s", "--token", "t"]).unwrap();
+        assert!(bare.root.is_none());
+    }
 }

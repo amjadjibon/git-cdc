@@ -30,7 +30,10 @@ pub fn endpoint() -> (String, Option<tempfile::TempDir>) {
 fn spawn(root: PathBuf) -> String {
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
-        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
         rt.block_on(async move {
             let fs = s3s_fs::FileSystem::new(root).unwrap();
             let service = {
@@ -39,11 +42,14 @@ fn spawn(root: PathBuf) -> String {
                 b.build()
             };
             let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-            tx.send(format!("http://{}", listener.local_addr().unwrap())).unwrap();
+            tx.send(format!("http://{}", listener.local_addr().unwrap()))
+                .unwrap();
             let http = ConnBuilder::new(TokioExecutor::new());
             loop {
                 let (socket, _) = listener.accept().await.unwrap();
-                let conn = http.serve_connection(TokioIo::new(socket), service.clone()).into_owned();
+                let conn = http
+                    .serve_connection(TokioIo::new(socket), service.clone())
+                    .into_owned();
                 tokio::spawn(async move {
                     let _ = conn.await;
                 });

@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 
 use crate::chunker::{Chunk, ChunkParams};
 
@@ -114,7 +114,9 @@ impl Manifest {
         }
 
         let mut take = |k: &str| -> Result<String> {
-            header.remove(k).with_context(|| format!("manifest missing {k:?}"))
+            header
+                .remove(k)
+                .with_context(|| format!("manifest missing {k:?}"))
         };
         let oid = parse_hash(&take("oid")?)?;
         let size: u64 = take("size")?.parse().context("bad size")?;
@@ -171,7 +173,12 @@ mod tests {
             offset: 0,
             length: data.len() as u32,
         };
-        Manifest::new(blake3::hash(data), data.len() as u64, vec![chunk], ChunkParams::default())
+        Manifest::new(
+            blake3::hash(data),
+            data.len() as u64,
+            vec![chunk],
+            ChunkParams::default(),
+        )
     }
 
     #[test]
@@ -225,7 +232,9 @@ mod tests {
         assert!(Manifest::parse(bad.as_bytes()).is_err());
         // Size/chunk mismatch:
         let m = sample();
-        let tampered = m.encode().replace(&format!("size {}", m.size), "size 999999");
+        let tampered = m
+            .encode()
+            .replace(&format!("size {}", m.size), "size 999999");
         assert!(Manifest::parse(tampered.as_bytes()).is_err());
     }
 
@@ -249,7 +258,10 @@ mod tests {
     fn rejects_uppercase_and_underscore_keys() {
         for bad in ["Size 5", "chunk_min 1"] {
             let text = format!("{VERSION_LINE}\n{bad}\n");
-            assert!(Manifest::parse(text.as_bytes()).is_err(), "{bad:?} accepted");
+            assert!(
+                Manifest::parse(text.as_bytes()).is_err(),
+                "{bad:?} accepted"
+            );
         }
     }
 
@@ -258,13 +270,19 @@ mod tests {
         let data = crate::chunker::tests::test_data(5 * 1024 * 1024, 3);
         let mut store: std::collections::HashMap<blake3::Hash, Vec<u8>> =
             std::collections::HashMap::new();
-        let (chunks, oid, size) = crate::chunker::chunk_stream(&data[..], ChunkParams::default(), |c, bytes| {
-            store.insert(c.hash, bytes.to_vec());
-            Ok(())
-        })
-        .unwrap();
+        let (chunks, oid, size) =
+            crate::chunker::chunk_stream(&data[..], ChunkParams::default(), |c, bytes| {
+                store.insert(c.hash, bytes.to_vec());
+                Ok(())
+            })
+            .unwrap();
 
-        let m = Manifest::parse(Manifest::new(oid, size, chunks, ChunkParams::default()).encode().as_bytes()).unwrap();
+        let m = Manifest::parse(
+            Manifest::new(oid, size, chunks, ChunkParams::default())
+                .encode()
+                .as_bytes(),
+        )
+        .unwrap();
         let mut rebuilt = Vec::with_capacity(m.size as usize);
         for c in &m.chunks {
             rebuilt.extend_from_slice(&store[&c.hash]);

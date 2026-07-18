@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use git_cdc_core::protocol::*;
 use git_cdc_core::store::DiskStore;
-use git_cdc_server::{app, AppState, Backend};
+use git_cdc_server::{AppState, Backend, app};
 
 async fn spawn_server(grace: Duration) -> (String, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
@@ -68,7 +68,11 @@ async fn auth_is_enforced() {
         .await
         .unwrap();
     assert_eq!(r.status(), 401);
-    let r = client().get(format!("{base}/healthz")).send().await.unwrap();
+    let r = client()
+        .get(format!("{base}/healthz"))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(r.status(), 200);
 }
 
@@ -85,7 +89,13 @@ async fn batch_upload_download_round_trip() {
     // Upload negotiation: server is empty, so it must offer an upload action.
     let resp = batch(&c, &base, Operation::Upload, vec![spec.clone()]).await;
     assert_eq!(resp.transfer, "basic");
-    let action = resp.objects[0].actions.as_ref().unwrap().upload.as_ref().unwrap();
+    let action = resp.objects[0]
+        .actions
+        .as_ref()
+        .unwrap()
+        .upload
+        .as_ref()
+        .unwrap();
 
     let r = c
         .put(format!("{base}{}", action.href))
@@ -102,7 +112,14 @@ async fn batch_upload_download_round_trip() {
 
     // Download negotiation + fetch.
     let resp = batch(&c, &base, Operation::Download, vec![spec.clone()]).await;
-    let href = &resp.objects[0].actions.as_ref().unwrap().download.as_ref().unwrap().href;
+    let href = &resp.objects[0]
+        .actions
+        .as_ref()
+        .unwrap()
+        .download
+        .as_ref()
+        .unwrap()
+        .href;
     let got = c.get(format!("{base}{href}")).send().await.unwrap();
     assert_eq!(got.status(), 200);
     assert_eq!(got.bytes().await.unwrap().as_ref(), &data[..]);
@@ -185,12 +202,13 @@ async fn gc_accepts_large_live_sets() {
     // ~100k live oids is a >2 MB JSON body; /gc must share the raised body
     // limit, not axum's 2 MB default (small-chunk configs make this routine).
     let (base, _dir) = spawn_server(Duration::from_secs(3600)).await;
-    let live: Vec<String> = (0..100_000u32)
-        .map(|i| oid(&i.to_le_bytes()))
-        .collect();
+    let live: Vec<String> = (0..100_000u32).map(|i| oid(&i.to_le_bytes())).collect();
     let r = client()
         .post(format!("{base}/gc"))
-        .json(&GcRequest { live_oids: live, dry_run: true })
+        .json(&GcRequest {
+            live_oids: live,
+            dry_run: true,
+        })
         .send()
         .await
         .unwrap();
@@ -229,7 +247,11 @@ async fn gc_deletes_orphans_past_grace_only() {
         .await
         .unwrap();
     assert_eq!(resp.deleted, vec![oid(&orphan)]);
-    let still = c.get(format!("{base}/chunks/{}", oid(&orphan))).send().await.unwrap();
+    let still = c
+        .get(format!("{base}/chunks/{}", oid(&orphan)))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(still.status(), 200);
 
     // Real run deletes the orphan, keeps the live chunk.
@@ -247,8 +269,16 @@ async fn gc_deletes_orphans_past_grace_only() {
         .unwrap();
     assert_eq!(resp.deleted, vec![oid(&orphan)]);
     assert_eq!(resp.kept_live, 1);
-    let gone = c.get(format!("{base}/chunks/{}", oid(&orphan))).send().await.unwrap();
+    let gone = c
+        .get(format!("{base}/chunks/{}", oid(&orphan)))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(gone.status(), 404);
-    let kept = c.get(format!("{base}/chunks/{}", oid(&live))).send().await.unwrap();
+    let kept = c
+        .get(format!("{base}/chunks/{}", oid(&live)))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(kept.status(), 200);
 }

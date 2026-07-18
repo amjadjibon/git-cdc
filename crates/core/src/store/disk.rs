@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 
 use super::ChunkStore;
 
@@ -21,7 +21,10 @@ impl DiskStore {
 
     pub fn path_for(&self, hash: &blake3::Hash) -> PathBuf {
         let hex = hash.to_hex();
-        self.root.join(&hex[0..2]).join(&hex[2..4]).join(hex.as_str())
+        self.root
+            .join(&hex[0..2])
+            .join(&hex[2..4])
+            .join(hex.as_str())
     }
 
     /// All chunk hashes currently in the store (for GC sweeps).
@@ -74,11 +77,7 @@ impl ChunkStore for DiskStore {
         // Temp file + atomic rename: a killed process never leaves a
         // half-written chunk that has() reports present. Unique temp name so
         // concurrent double-puts of the same chunk don't clobber each other.
-        let tmp = dir.join(format!(
-            ".tmp-{}-{}",
-            std::process::id(),
-            hash.to_hex()
-        ));
+        let tmp = dir.join(format!(".tmp-{}-{}", std::process::id(), hash.to_hex()));
         fs::write(&tmp, data).context("writing chunk temp file")?;
         fs::rename(&tmp, &path).context("committing chunk")?;
         Ok(())

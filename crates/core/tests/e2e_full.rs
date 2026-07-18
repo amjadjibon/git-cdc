@@ -8,7 +8,7 @@ use std::process::Command;
 use std::time::Duration;
 
 use git_cdc_core::store::DiskStore;
-use git_cdc_server::{app, AppState, Backend};
+use git_cdc_server::{AppState, Backend, app};
 
 const BIN: &str = env!("CARGO_BIN_EXE_git-cdc");
 const TOKEN: &str = "e2e-token";
@@ -22,7 +22,8 @@ fn spawn_server(root: PathBuf, grace: Duration) -> String {
             .unwrap();
         rt.block_on(async move {
             let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-            tx.send(format!("http://{}", listener.local_addr().unwrap())).unwrap();
+            tx.send(format!("http://{}", listener.local_addr().unwrap()))
+                .unwrap();
             let state = AppState {
                 backend: Backend::Disk(DiskStore::new(root)),
                 token: TOKEN.into(),
@@ -48,7 +49,9 @@ fn git_cmd(repo: &Path, args: &[&str]) -> std::process::Output {
     // Hooks invoke `git cdc push` via $PATH — put our freshly built binary first.
     let bin_dir = Path::new(BIN).parent().unwrap();
     let path = format!("{}:{}", bin_dir.display(), std::env::var("PATH").unwrap());
-    Command::new("git").env("GIT_CONFIG_GLOBAL", "/dev/null").env("GIT_CONFIG_SYSTEM", "/dev/null")
+    Command::new("git")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
         .args(args)
         .current_dir(repo)
         .env("PATH", path)
@@ -57,7 +60,13 @@ fn git_cmd(repo: &Path, args: &[&str]) -> std::process::Output {
 }
 
 fn cdc(repo: &Path, args: &[&str]) -> String {
-    let out = Command::new(BIN).env("GIT_CONFIG_GLOBAL", "/dev/null").env("GIT_CONFIG_SYSTEM", "/dev/null").args(args).current_dir(repo).output().unwrap();
+    let out = Command::new(BIN)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .args(args)
+        .current_dir(repo)
+        .output()
+        .unwrap();
     assert!(
         out.status.success(),
         "git-cdc {args:?} failed: {}",
@@ -70,8 +79,14 @@ fn setup_repo(repo: &Path, server_url: &str) {
     git(repo, &["config", "user.email", "test@example.com"]);
     git(repo, &["config", "user.name", "Test"]);
     cdc(repo, &["install"]);
-    git(repo, &["config", "filter.cdc.clean", &format!("{BIN} clean")]);
-    git(repo, &["config", "filter.cdc.smudge", &format!("{BIN} smudge")]);
+    git(
+        repo,
+        &["config", "filter.cdc.clean", &format!("{BIN} clean")],
+    );
+    git(
+        repo,
+        &["config", "filter.cdc.smudge", &format!("{BIN} smudge")],
+    );
     git(repo, &["config", "cdc.url", server_url]);
     git(repo, &["config", "cdc.token", TOKEN]);
 }
@@ -89,7 +104,10 @@ fn test_data(len: usize, seed: u64) -> Vec<u8> {
 }
 
 fn server_chunk_count(server_root: &Path) -> usize {
-    DiskStore::new(server_root.join("objects")).list().unwrap().len()
+    DiskStore::new(server_root.join("objects"))
+        .list()
+        .unwrap()
+        .len()
 }
 
 #[test]
@@ -110,8 +128,17 @@ fn push_with_missing_local_chunk_says_how_to_recover() {
     // that never pulled) and the server never got them: push cannot invent
     // the bytes — it must fail and name the fix.
     fs::remove_dir_all(repo.join(".git/cdc")).unwrap();
-    let out = Command::new(BIN).env("GIT_CONFIG_GLOBAL", "/dev/null").env("GIT_CONFIG_SYSTEM", "/dev/null").args(["push"]).current_dir(&repo).output().unwrap();
-    assert!(!out.status.success(), "push cannot succeed without the chunk bytes");
+    let out = Command::new(BIN)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .args(["push"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    assert!(
+        !out.status.success(),
+        "push cannot succeed without the chunk bytes"
+    );
     assert!(
         String::from_utf8_lossy(&out.stderr).contains("git cdc pull"),
         "error must tell the user how to recover: {}",
@@ -128,13 +155,25 @@ fn sync_without_remote_config_names_both_options() {
     git(&repo, &["config", "user.email", "test@example.com"]);
     git(&repo, &["config", "user.name", "Test"]);
     cdc(&repo, &["track", "*.bin"]);
-    git(&repo, &["config", "filter.cdc.clean", &format!("{BIN} clean")]);
-    git(&repo, &["config", "filter.cdc.smudge", &format!("{BIN} smudge")]);
+    git(
+        &repo,
+        &["config", "filter.cdc.clean", &format!("{BIN} clean")],
+    );
+    git(
+        &repo,
+        &["config", "filter.cdc.smudge", &format!("{BIN} smudge")],
+    );
     fs::write(repo.join("asset.bin"), test_data(1024 * 1024, 7)).unwrap();
     git(&repo, &["add", "."]);
     git(&repo, &["commit", "-q", "-m", "v1"]);
 
-    let out = Command::new(BIN).env("GIT_CONFIG_GLOBAL", "/dev/null").env("GIT_CONFIG_SYSTEM", "/dev/null").args(["push"]).current_dir(&repo).output().unwrap();
+    let out = Command::new(BIN)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .args(["push"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
     assert!(!out.status.success());
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(
@@ -163,7 +202,10 @@ fn full_push_clone_pull_gc_cycle() {
 
     cdc(&repo, &["push"]);
     let count_v1 = server_chunk_count(&server_root);
-    assert!(count_v1 >= 3, "20 MiB should be several chunks, got {count_v1}");
+    assert!(
+        count_v1 >= 3,
+        "20 MiB should be several chunks, got {count_v1}"
+    );
 
     // 1 KiB edit in the middle → v2.
     for (i, b) in data[10_000_000..10_001_024].iter_mut().enumerate() {
@@ -184,13 +226,22 @@ fn full_push_clone_pull_gc_cycle() {
 
     // pre-push hook guard
     let remote = tmp.path().join("remote.git");
-    git(tmp.path(), &["init", "-q", "--bare", &remote.to_string_lossy()]);
-    git(&repo, &["remote", "add", "origin", &remote.to_string_lossy()]);
+    git(
+        tmp.path(),
+        &["init", "-q", "--bare", &remote.to_string_lossy()],
+    );
+    git(
+        &repo,
+        &["remote", "add", "origin", &remote.to_string_lossy()],
+    );
 
     // Unreachable server → hook's `git cdc push` fails → git push is blocked.
     git(&repo, &["config", "cdc.url", "http://127.0.0.1:1"]);
     let blocked = git_cmd(&repo, &["push", "origin", "main"]);
-    assert!(!blocked.status.success(), "push should be blocked by the pre-push hook");
+    assert!(
+        !blocked.status.success(),
+        "push should be blocked by the pre-push hook"
+    );
 
     // Reachable again → hook succeeds → push goes through.
     git(&repo, &["config", "cdc.url", &url]);
@@ -198,7 +249,15 @@ fn full_push_clone_pull_gc_cycle() {
 
     // fresh clone: succeeds, passthrough, pull materializes
     let clone = tmp.path().join("clone");
-    git(tmp.path(), &["clone", "-q", &remote.to_string_lossy(), &clone.to_string_lossy()]);
+    git(
+        tmp.path(),
+        &[
+            "clone",
+            "-q",
+            &remote.to_string_lossy(),
+            &clone.to_string_lossy(),
+        ],
+    );
     setup_repo(&clone, &url);
 
     let worktree = fs::read(clone.join("asset.bin")).unwrap();
@@ -208,7 +267,11 @@ fn full_push_clone_pull_gc_cycle() {
     );
 
     cdc(&clone, &["pull"]);
-    assert_eq!(fs::read(clone.join("asset.bin")).unwrap(), data_v2, "v2 materialized");
+    assert_eq!(
+        fs::read(clone.join("asset.bin")).unwrap(),
+        data_v2,
+        "v2 materialized"
+    );
 
     // v1 restores through smudge now that chunks are local (pull fetched only
     // v2's chunks; v1 shares all but the edited ones — fetch the rest).
@@ -227,15 +290,30 @@ fn full_push_clone_pull_gc_cycle() {
     git(&repo, &["push", "-q", "--force", "origin", "main"]);
     let before = server_chunk_count(&server_root);
     let dry = cdc(&repo, &["gc", "--dry-run", "--grace-secs", "0"]);
-    assert_eq!(server_chunk_count(&server_root), before, "dry run deletes nothing ({dry})");
+    assert_eq!(
+        server_chunk_count(&server_root),
+        before,
+        "dry run deletes nothing ({dry})"
+    );
     cdc(&repo, &["gc", "--grace-secs", "0"]);
     let after = server_chunk_count(&server_root);
-    assert!(after < before, "gc should remove v2-only chunks ({before} -> {after})");
+    assert!(
+        after < before,
+        "gc should remove v2-only chunks ({before} -> {after})"
+    );
     assert_eq!(after, count_v1, "server back to exactly the v1 chunk set");
 
     // Everything still fetchable after gc.
     let clone2 = tmp.path().join("clone2");
-    git(tmp.path(), &["clone", "-q", &remote.to_string_lossy(), &clone2.to_string_lossy()]);
+    git(
+        tmp.path(),
+        &[
+            "clone",
+            "-q",
+            &remote.to_string_lossy(),
+            &clone2.to_string_lossy(),
+        ],
+    );
     setup_repo(&clone2, &url);
     cdc(&clone2, &["pull"]);
     assert_eq!(

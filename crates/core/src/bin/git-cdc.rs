@@ -3,10 +3,10 @@ use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::process::Command as Git;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
-use git_cdc_core::chunker::{chunk_stream, ChunkParams};
-use git_cdc_core::manifest::{is_manifest, Manifest};
+use git_cdc_core::chunker::{ChunkParams, chunk_stream};
+use git_cdc_core::manifest::{Manifest, is_manifest};
 use git_cdc_core::protocol::{ObjectSpec, Operation};
 use git_cdc_core::store::{ChunkStore, DiskStore};
 
@@ -58,7 +58,10 @@ fn main() -> Result<()> {
         Cmd::Smudge => cmd_smudge(),
         Cmd::Pull => cmd_pull(),
         Cmd::Push => cmd_push(),
-        Cmd::Gc { dry_run, grace_secs } => cmd_gc(dry_run, grace_secs),
+        Cmd::Gc {
+            dry_run,
+            grace_secs,
+        } => cmd_gc(dry_run, grace_secs),
         Cmd::Diff { from, to } => cmd_diff(&from, &to),
     }
 }
@@ -80,7 +83,10 @@ fn repo_root() -> Result<PathBuf> {
 }
 
 fn git_dir() -> Result<PathBuf> {
-    Ok(PathBuf::from(git_out(&["rev-parse", "--absolute-git-dir"])?))
+    Ok(PathBuf::from(git_out(&[
+        "rev-parse",
+        "--absolute-git-dir",
+    ])?))
 }
 
 fn local_store() -> Result<DiskStore> {
@@ -95,7 +101,8 @@ fn chunk_params() -> Result<ChunkParams> {
             return Ok(default); // unset — a malformed value must NOT land here
         }
         let v = git_out(&["config", "--type=int", "--get", key])?;
-        v.parse::<u64>().ok()
+        v.parse::<u64>()
+            .ok()
             .and_then(|v| u32::try_from(v).ok())
             .with_context(|| format!("{key} = {v:?} is not a valid size"))
     };
@@ -133,7 +140,10 @@ fn cmd_install(global: bool) -> Result<()> {
             }
         } else {
             fs::create_dir_all(hook.parent().unwrap())?;
-            fs::write(&hook, "#!/bin/sh\n# installed by git-cdc\ngit cdc push || exit 1\n")?;
+            fs::write(
+                &hook,
+                "#!/bin/sh\n# installed by git-cdc\ngit cdc push || exit 1\n",
+            )?;
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
@@ -141,7 +151,10 @@ fn cmd_install(global: bool) -> Result<()> {
             }
         }
     }
-    eprintln!("git-cdc filter installed ({})", if global { "global" } else { "local" });
+    eprintln!(
+        "git-cdc filter installed ({})",
+        if global { "global" } else { "local" }
+    );
     Ok(())
 }
 
@@ -260,7 +273,9 @@ fn remote() -> Result<Remote> {
     )?;
     let token = git_out(&["config", "--get", "cdc.token"])
         .context("cdc.token is not configured; set it with `git config cdc.token <token>`")?;
-    Ok(Remote::Http(git_cdc_core::client::Client::new(&url, &token)))
+    Ok(Remote::Http(git_cdc_core::client::Client::new(
+        &url, &token,
+    )))
 }
 
 fn oid_str(hash: &blake3::Hash) -> String {
@@ -314,7 +329,9 @@ fn all_manifests() -> Result<Vec<Manifest>> {
         if typ == "missing" {
             continue;
         }
-        let size: u64 = size.parse().with_context(|| format!("bad cat-file header: {header:?}"))?;
+        let size: u64 = size
+            .parse()
+            .with_context(|| format!("bad cat-file header: {header:?}"))?;
         let mut body = vec![0u8; size as usize + 1]; // content + trailing LF
         from_git.read_exact(&mut body)?;
         body.pop();
@@ -345,10 +362,10 @@ fn index_manifests() -> Result<Vec<(String, Manifest)>> {
         if !blob.status.success() {
             continue;
         }
-        if is_manifest(&blob.stdout) {
-            if let Ok(m) = Manifest::parse(&blob.stdout) {
-                out.push((path.to_string(), m));
-            }
+        if is_manifest(&blob.stdout)
+            && let Ok(m) = Manifest::parse(&blob.stdout)
+        {
+            out.push((path.to_string(), m));
         }
     }
     Ok(out)
@@ -410,7 +427,10 @@ fn cmd_push() -> Result<()> {
             anyhow::Ok(uploaded)
         })?,
     };
-    eprintln!("git-cdc: pushed {uploaded} of {total} chunks ({} already remote)", total - uploaded);
+    eprintln!(
+        "git-cdc: pushed {uploaded} of {total} chunks ({} already remote)",
+        total - uploaded
+    );
     Ok(())
 }
 
@@ -437,12 +457,20 @@ fn cmd_pull() -> Result<()> {
             Remote::Http(client) => {
                 let objects = missing
                     .iter()
-                    .map(|(h, size)| ObjectSpec { oid: oid_str(h), size: *size })
+                    .map(|(h, size)| ObjectSpec {
+                        oid: oid_str(h),
+                        size: *size,
+                    })
                     .collect();
                 let resp = client.batch(Operation::Download, objects)?;
                 for obj in &resp.objects {
                     if let Some(err) = &obj.error {
-                        bail!("server cannot provide {}: {} {}", obj.oid, err.code, err.message);
+                        bail!(
+                            "server cannot provide {}: {} {}",
+                            obj.oid,
+                            err.code,
+                            err.message
+                        );
                     }
                     let href = &obj
                         .actions
@@ -521,8 +549,11 @@ fn cmd_gc(dry_run: bool, grace_secs: u64) -> Result<()> {
         }
         swept += 1;
     }
-    eprintln!("git-cdc: local gc {} {swept} unreferenced chunks ({} live)",
-        if dry_run { "would remove" } else { "removed" }, live.len());
+    eprintln!(
+        "git-cdc: local gc {} {swept} unreferenced chunks ({} live)",
+        if dry_run { "would remove" } else { "removed" },
+        live.len()
+    );
 
     // Remote sweep, if a remote is configured.
     match remote() {

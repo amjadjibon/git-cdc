@@ -1,6 +1,6 @@
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 
 /// Shared S3 connection settings (server flags / CLI git-config both map here).
 #[derive(Debug, Clone, Default)]
@@ -99,7 +99,12 @@ impl S3Store {
             .send()
             .await
             .with_context(|| format!("chunk {} not in s3 store", hash.to_hex()))?;
-        let data = resp.body.collect().await.context("reading s3 body")?.to_vec();
+        let data = resp
+            .body
+            .collect()
+            .await
+            .context("reading s3 body")?
+            .to_vec();
         if blake3::hash(&data) != *hash {
             bail!("chunk {} is corrupt in s3", hash.to_hex());
         }
@@ -132,7 +137,9 @@ impl S3Store {
             let page = page.context("s3 list_objects_v2")?;
             for obj in page.contents() {
                 let Some(key) = obj.key() else { continue };
-                let Some(hex) = key.strip_prefix(&self.prefix) else { continue };
+                let Some(hex) = key.strip_prefix(&self.prefix) else {
+                    continue;
+                };
                 let Ok(hash) = blake3::Hash::from_hex(hex) else {
                     continue; // foreign object under our prefix — not ours to GC
                 };

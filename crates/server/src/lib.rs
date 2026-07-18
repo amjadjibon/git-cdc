@@ -52,14 +52,14 @@ async fn auth(State(state): State<Arc<AppState>>, req: Request, next: Next) -> R
     }
 }
 
-async fn batch(
-    State(state): State<Arc<AppState>>,
-    Json(req): Json<BatchRequest>,
-) -> Response {
+async fn batch(State(state): State<Arc<AppState>>, Json(req): Json<BatchRequest>) -> Response {
     if req.hash_algo != HASH_ALGO {
         return (
             StatusCode::BAD_REQUEST,
-            format!("unsupported hash_algo {:?}, server speaks {HASH_ALGO:?}", req.hash_algo),
+            format!(
+                "unsupported hash_algo {:?}, server speaks {HASH_ALGO:?}",
+                req.hash_algo
+            ),
         )
             .into_response();
     }
@@ -200,11 +200,10 @@ async fn gc(State(state): State<Arc<AppState>>, Json(req): Json<GcRequest>) -> R
         let age = modified.and_then(|mtime| now.duration_since(mtime).ok());
         match age {
             Some(age) if age >= state.grace => {
-                if !req.dry_run {
-                    if let Err(e) = state.backend.remove(&hash).await {
-                        return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
-                            .into_response();
-                    }
+                if !req.dry_run
+                    && let Err(e) = state.backend.remove(&hash).await
+                {
+                    return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
                 }
                 resp.deleted.push(format!("blake3:{}", hash.to_hex()));
             }
