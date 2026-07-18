@@ -9,7 +9,9 @@ permissions:
 
 jobs:
   goreleaser:
-    runs-on: ubuntu-latest
+    # macOS runner: darwin targets need the real Apple SDK (frameworks like
+    # Security aren't in zig's stubs); zigbuild covers the linux targets.
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
         with:
@@ -19,11 +21,39 @@ jobs:
           targets: x86_64-unknown-linux-gnu,aarch64-unknown-linux-gnu,x86_64-apple-darwin,aarch64-apple-darwin
       - uses: Swatinem/rust-cache@v2
       - uses: mlugg/setup-zig@v2
-      - name: Install cargo-zigbuild
-        run: cargo install --locked cargo-zigbuild
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-zigbuild
       - uses: goreleaser/goreleaser-action@v6
         with:
           version: "~> v2"
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  image:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Containerfile
+          push: true
+          # ponytail: amd64 only — add linux/arm64 via a native arm runner
+          # (ubuntu-24.04-arm) + manifest merge when someone needs it; qemu
+          # cross-builds of the rust stage are painfully slow.
+          platforms: linux/amd64
+          tags: |
+            ghcr.io/${{ github.repository }}-server:${{ github.ref_name }}
+            ghcr.io/${{ github.repository }}-server:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

@@ -15,18 +15,8 @@ builds:
       - aarch64-unknown-linux-gnu
       - x86_64-apple-darwin
       - aarch64-apple-darwin
-  - id: git-cdc-server
-    builder: rust
-    binary: git-cdc-server
-    command: zigbuild
-    flags:
-      - --release
-      - -p=git-cdc-server
-    targets:
-      - x86_64-unknown-linux-gnu
-      - aarch64-unknown-linux-gnu
-      - x86_64-apple-darwin
-      - aarch64-apple-darwin
+# The server ships as a container image (see Containerfile + the release
+# workflow's image job), not as release binaries.
 
 archives:
   - id: default
