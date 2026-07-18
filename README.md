@@ -21,7 +21,7 @@ What lands in git is a small text **manifest** (one line per chunk) instead of
 the file content, so binary changes diff cleanly:
 
 ```text
-version https://git-cdc.dev/spec/v1
+version git-cdc/spec/v1
 chunk-avg 2097152
 chunk-max 8388608
 chunk-min 524288
@@ -31,6 +31,8 @@ chunk blake3:9f2a1e… 0 2097152
 chunk blake3:7c4d02… 2097152 2583032
 …
 ```
+
+Full format definition: [docs/spec/manifest.md](docs/spec/manifest.md).
 
 ## Install
 

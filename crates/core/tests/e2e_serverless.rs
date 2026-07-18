@@ -127,7 +127,7 @@ fn serverless_push_clone_pull_gc() {
     setup_repo(&clone, &endpoint);
     assert!(fs::read(clone.join("asset.bin"))
         .unwrap()
-        .starts_with(b"version https://git-cdc.dev/spec/v1\n"));
+        .starts_with(b"version git-cdc/spec/v1\n"));
     cdc(&clone, &["pull"]);
     assert_eq!(fs::read(clone.join("asset.bin")).unwrap(), data, "v2 materialized from bucket");
 

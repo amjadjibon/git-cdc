@@ -525,6 +525,9 @@ separate protocol.
 
 ### 15.1 Tighten the Manifest Encoding to Pointer-File Rules
 
+> **Superseded**: the normative manifest spec now lives at
+> `docs/spec/manifest.md`. This section is kept as design rationale.
+
 LFS's pointer file spec is deliberately strict so that pointer blobs are
 byte-for-byte reproducible (git diffs cleanly, and two implementations
 hashing the same content produce an identical blob). Rules worth copying
@@ -542,7 +545,7 @@ into the manifest format (section 6):
 Revised manifest header, matching this discipline:
 
 ```
-version https://git-cdc.dev/spec/v1
+version git-cdc/spec/v1
 chunk-avg 2097152
 chunk-max 8388608
 chunk-min 524288

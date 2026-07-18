@@ -152,7 +152,7 @@ fn full_push_clone_pull_gc_cycle() {
 
     let worktree = fs::read(clone.join("asset.bin")).unwrap();
     assert!(
-        worktree.starts_with(b"version https://git-cdc.dev/spec/v1\n"),
+        worktree.starts_with(b"version git-cdc/spec/v1\n"),
         "fresh clone should hold manifest text before pull"
     );
 

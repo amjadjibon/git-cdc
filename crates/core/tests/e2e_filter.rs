@@ -70,7 +70,7 @@ fn add_checkout_round_trip_is_byte_identical() {
     // The committed blob is a manifest, not the file content.
     let blob = git(repo, &["show", "HEAD:asset.bin"]);
     assert!(
-        blob.starts_with("version https://git-cdc.dev/spec/v1\n"),
+        blob.starts_with("version git-cdc/spec/v1\n"),
         "committed blob is not a manifest: {:.80}",
         blob
     );
@@ -98,7 +98,7 @@ fn smudge_with_empty_store_passes_manifest_through() {
 
     // Checkout succeeded (no hard error) and the worktree holds manifest text.
     let content = fs::read(repo.join("asset.bin")).unwrap();
-    assert!(content.starts_with(b"version https://git-cdc.dev/spec/v1\n"));
+    assert!(content.starts_with(b"version git-cdc/spec/v1\n"));
 
     // Re-adding the passed-through manifest must not re-chunk it (clean
     // passthrough): the staged blob stays byte-identical to the manifest.

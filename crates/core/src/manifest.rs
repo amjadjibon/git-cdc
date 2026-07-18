@@ -5,11 +5,11 @@ use anyhow::{bail, Context, Result};
 
 use crate::chunker::{Chunk, AVG_SIZE, MAX_SIZE, MIN_SIZE};
 
-/// Normative manifest spec: DESIGN.md §15.1. LFS-pointer-style discipline:
+/// Normative manifest spec: docs/spec/manifest.md. LFS-pointer-style discipline:
 /// UTF-8, LF only, `{key} {value}` lines, `version` first, remaining header
 /// keys sorted, unknown keys preserved. Chunk lines follow the header.
-pub const VERSION: &str = "https://git-cdc.dev/spec/v1";
-const VERSION_LINE: &str = "version https://git-cdc.dev/spec/v1";
+pub const VERSION: &str = "git-cdc/spec/v1";
+const VERSION_LINE: &str = "version git-cdc/spec/v1";
 const HASH_PREFIX: &str = "blake3:";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -214,7 +214,7 @@ mod tests {
     #[test]
     fn rejects_non_manifest_input() {
         assert!(!is_manifest(b"just a regular binary file \x00\x01"));
-        assert!(!is_manifest(b"version https://git-cdc.dev/spec/v1x\n"));
+        assert!(!is_manifest(b"version git-cdc/spec/v1x\n"));
         assert!(Manifest::parse(b"random bytes").is_err());
         // Right version line but header damage:
         let bad = format!("{VERSION_LINE}\nsize notanumber\n");

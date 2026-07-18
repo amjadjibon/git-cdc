@@ -27,7 +27,7 @@ Previous review (of the unphased design doc, since renamed to DESIGN.md): both b
 
 **Phase**: 5 (task 5.2)
 **Issue**: "`git rev-parse --all` + `git cat-file` on tracked paths" enumerates refs, not blobs; finding every manifest across history (which both `push` and `gc` need for correctness) requires walking objects. An implementer will discover this mid-task.
-**Fix**: Specify `git rev-list --all --objects` piped to `git cat-file --batch`, identifying manifests by their fixed first line (`version https://git-cdc.dev/spec/v1`) rather than by path/attribute matching.
+**Fix**: Specify `git rev-list --all --objects` piped to `git cat-file --batch`, identifying manifests by their fixed first line (`version git-cdc/spec/v1`) rather than by path/attribute matching.
 
 ### [SUGGEST-002] No pre-push ordering guard
 

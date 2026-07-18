@@ -169,7 +169,7 @@ Depends on: Phases 3, 4.
 - [x] **5.2** `push`: enumerate every manifest blob across history via
   `git rev-list --all --objects` piped to `git cat-file --batch`,
   identifying manifests by their fixed first line
-  (`version https://git-cdc.dev/spec/v1`) — not by path/attribute matching,
+  (`version git-cdc/spec/v1`) — not by path/attribute matching,
   which misses renamed or historical files; batch-negotiate, upload only
   missing chunks. `pull`: read manifests from the **index** (`git ls-files`
   + attribute check), not the worktree — after a fresh clone the worktree
