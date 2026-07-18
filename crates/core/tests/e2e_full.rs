@@ -28,6 +28,7 @@ fn spawn_server(root: PathBuf, grace: Duration) -> String {
                 backend: Backend::Disk(DiskStore::new(root)),
                 token: TOKEN.into(),
                 grace,
+                upload_times: Default::default(),
             };
             axum::serve(listener, app(state)).await.unwrap();
         });

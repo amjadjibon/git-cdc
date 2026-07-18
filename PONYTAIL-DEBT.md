@@ -5,13 +5,18 @@ names its ceiling (the limit it holds until) and the trigger to revisit.
 Regenerate with `grep -rnE '(#|//) ?ponytail:' .` (skip `target/`,
 `docs/book/book/`).
 
-Last scan: 2026-07-19 · 1 marker, 0 with no trigger.
+Last scan: 2026-07-19 · 0 markers. Clean ledger.
 
-| Where | Shortcut | Ceiling | Upgrade trigger |
-| ----- | -------- | ------- | --------------- |
-| `crates/server/src/lib.rs` (gc handler) | GC grace trusts store timestamps (disk mtime / S3 `LastModified`) | A skewed store clock could sweep early or retain garbage | GC runs against a store this team doesn't control, or a sweep deletes a chunk younger than its grace → switch to server-recorded upload times |
+(no open markers)
 
 ## Resolved
+
+- ~~GC grace trusted store timestamps~~ — server now records upload times
+  on its own clock and GC prefers them; store timestamps only cover chunks
+  from before a restart, and a regression test backdates a chunk's mtime a
+  year to prove a skewed store clock can't defeat the grace. Serverless-CLI
+  bucket sweeps still use `LastModified` (there is no server to record
+  times) — the CLI's `--grace-secs` remains the guard there. 2026-07-19.
 
 - ~~Sequential HTTP push uploads~~ — bounded concurrency (4 workers pulling
   from a shared index), 2026-07-19. S3 push remains sequential by choice:

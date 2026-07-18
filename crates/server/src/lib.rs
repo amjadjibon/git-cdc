@@ -1,4 +1,5 @@
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
 use axum::body::Bytes;
@@ -18,6 +19,13 @@ pub struct AppState {
     pub backend: Backend,
     pub token: String,
     pub grace: Duration,
+    /// Upload times on this server's own clock. GC's grace check prefers
+    /// these over store timestamps (disk mtime / S3 LastModified), whose
+    /// clock we may not control — a skewed store clock must never sweep a
+    /// chunk that was just uploaded. Lost on restart; store timestamps are
+    /// the fallback for chunks uploaded before then, and entries older than
+    /// the grace period are pruned on each GC.
+    pub upload_times: Mutex<HashMap<blake3::Hash, SystemTime>>,
 }
 
 pub fn app(state: AppState) -> Router {
@@ -143,7 +151,14 @@ async fn put_chunk(
             .into_response();
     }
     match state.backend.put(&hash, &body).await {
-        Ok(()) => StatusCode::OK.into_response(),
+        Ok(()) => {
+            state
+                .upload_times
+                .lock()
+                .unwrap()
+                .insert(hash, SystemTime::now());
+            StatusCode::OK.into_response()
+        }
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }
@@ -190,17 +205,17 @@ async fn gc(State(state): State<Arc<AppState>>, Json(req): Json<GcRequest>) -> R
         kept_grace: 0,
     };
     let now = SystemTime::now();
+    // Snapshot (can't hold the lock across the removal awaits below).
+    let recorded = state.upload_times.lock().unwrap().clone();
     for (hash, modified) in all {
         if live.contains(&hash) {
             resp.kept_live += 1;
             continue;
         }
-        // ponytail: modified-time grace (disk mtime / S3 LastModified)
-        // assumes store clock sanity; revisit if GC ever runs against a
-        // store this team doesn't control, or a sweep deletes a chunk
-        // younger than its grace — then switch to server-recorded upload
-        // times instead of store timestamps.
-        let age = modified.and_then(|mtime| now.duration_since(mtime).ok());
+        // Grace by this server's recorded upload time when we have one;
+        // the store's timestamp only covers chunks from before a restart.
+        let birth = recorded.get(&hash).copied().or(modified);
+        let age = birth.and_then(|t| now.duration_since(t).ok());
         match age {
             Some(age) if age >= state.grace => {
                 if !req.dry_run
@@ -213,5 +228,12 @@ async fn gc(State(state): State<Arc<AppState>>, Json(req): Json<GcRequest>) -> R
             _ => resp.kept_grace += 1,
         }
     }
+    // Entries past the grace period add nothing over store timestamps —
+    // prune them so the map stays bounded by recent-upload volume.
+    state
+        .upload_times
+        .lock()
+        .unwrap()
+        .retain(|_, t| now.duration_since(*t).is_ok_and(|a| a < state.grace));
     Json(resp).into_response()
 }

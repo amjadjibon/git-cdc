@@ -10,6 +10,7 @@ async fn spawn_server(grace: Duration) -> (String, tempfile::TempDir) {
         backend: Backend::Disk(DiskStore::new(dir.path().join("objects"))),
         token: "test-token".into(),
         grace,
+        upload_times: Default::default(),
     };
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
@@ -195,6 +196,47 @@ async fn chunks_above_old_default_max_are_accepted() {
         .await
         .unwrap();
     assert_eq!(r.status(), 413);
+}
+
+#[tokio::test]
+async fn gc_grace_survives_skewed_store_clock() {
+    // A store whose clock is wrong (here: mtime backdated a year) must not
+    // defeat the grace period — the server recorded the upload on its own
+    // clock and that recording wins.
+    let (base, dir) = spawn_server(Duration::from_secs(3600)).await;
+    let c = client();
+    let data = b"freshly uploaded orphan".to_vec();
+    let r = c
+        .put(format!("{base}/chunks/{}", oid(&data)))
+        .body(data.clone())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200);
+
+    let path = DiskStore::new(dir.path().join("objects")).path_for(&blake3::hash(&data));
+    let ancient = std::time::SystemTime::now() - Duration::from_secs(365 * 24 * 3600);
+    std::fs::File::options()
+        .append(true)
+        .open(&path)
+        .unwrap()
+        .set_modified(ancient)
+        .unwrap();
+
+    let resp: GcResponse = c
+        .post(format!("{base}/gc"))
+        .json(&GcRequest {
+            live_oids: vec![],
+            dry_run: false,
+        })
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(resp.deleted.is_empty(), "backdated chunk swept: {resp:?}");
+    assert_eq!(resp.kept_grace, 1);
 }
 
 #[tokio::test]

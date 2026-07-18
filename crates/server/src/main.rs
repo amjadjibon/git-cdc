@@ -76,6 +76,7 @@ async fn main() -> anyhow::Result<()> {
         backend,
         token: args.token,
         grace: Duration::from_secs(args.grace_secs),
+        upload_times: Default::default(),
     };
     let listener = tokio::net::TcpListener::bind(&args.listen).await?;
     eprintln!("git-cdc-server listening on {}", listener.local_addr()?);
