@@ -1285,7 +1285,7 @@ dependencies = [
 
 [[package]]
 name = "git-cdc-core"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "anyhow",
  "aws-config",
@@ -1307,7 +1307,7 @@ dependencies = [
 
 [[package]]
 name = "git-cdc-server"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "anyhow",
  "aws-config",
