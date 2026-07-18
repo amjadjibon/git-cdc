@@ -196,7 +196,10 @@ async fn gc(State(state): State<Arc<AppState>>, Json(req): Json<GcRequest>) -> R
             continue;
         }
         // ponytail: modified-time grace (disk mtime / S3 LastModified)
-        // assumes store clock sanity — fine for MVP.
+        // assumes store clock sanity; revisit if GC ever runs against a
+        // store this team doesn't control, or a sweep deletes a chunk
+        // younger than its grace — then switch to server-recorded upload
+        // times instead of store timestamps.
         let age = modified.and_then(|mtime| now.duration_since(mtime).ok());
         match age {
             Some(age) if age >= state.grace => {

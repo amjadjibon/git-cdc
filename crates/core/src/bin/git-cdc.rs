@@ -393,21 +393,46 @@ fn cmd_push() -> Result<()> {
                 .map(|(h, size)| ObjectSpec { oid: oid_str(h), size: *size })
                 .collect();
             let resp = client.batch(Operation::Upload, objects)?;
-            let mut uploaded = 0usize;
+            let mut pending: Vec<(String, blake3::Hash)> = Vec::new();
             for obj in &resp.objects {
                 let Some(action) = obj.actions.as_ref().and_then(|a| a.upload.as_ref()) else {
                     continue; // server already has it — the dedup win
                 };
                 let hash = git_cdc_core::manifest::parse_hash(&obj.oid)?;
-                let data = store.get(&hash).with_context(|| {
-                    format!("server wants {} but it is not in the local store — run `git cdc pull` first", obj.oid)
-                })?;
-                // ponytail: sequential uploads; add bounded concurrency when
-                // a real repo shows transfer time dominated by round-trips.
-                client.upload(&action.href, data)?;
-                uploaded += 1;
+                if !store.has(&hash) {
+                    bail!(
+                        "server wants {} but it is not in the local store — run `git cdc pull` first",
+                        obj.oid
+                    );
+                }
+                pending.push((action.href.clone(), hash));
             }
-            uploaded
+
+            // Bounded concurrency: chunks are ~MBs, so round-trips dominate
+            // on high-latency links; a few workers pulling from a shared
+            // index overlap them without flooding the server.
+            const UPLOAD_WORKERS: usize = 4;
+            let next = std::sync::atomic::AtomicUsize::new(0);
+            std::thread::scope(|scope| -> Result<()> {
+                let workers: Vec<_> = (0..UPLOAD_WORKERS.min(pending.len()))
+                    .map(|_| {
+                        scope.spawn(|| -> Result<()> {
+                            loop {
+                                let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                                let Some((href, hash)) = pending.get(i) else {
+                                    return Ok(());
+                                };
+                                client.upload(href, store.get(hash)?)?;
+                            }
+                        })
+                    })
+                    .collect();
+                for w in workers {
+                    w.join().expect("upload worker panicked")?;
+                }
+                Ok(())
+            })?;
+            pending.len()
         }
         Remote::S3 { store: s3, rt } => rt.block_on(async {
             // One paginated listing beats a HeadObject per chunk.

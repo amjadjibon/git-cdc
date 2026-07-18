@@ -31,8 +31,17 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  # Native runner per arch (qemu cross-builds of the rust stage are painfully
+  # slow), then one manifest stitches the arch tags together.
   image:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
       packages: write
@@ -49,12 +58,25 @@ jobs:
           context: .
           file: Containerfile
           push: true
-          # ponytail: amd64 only — add linux/arm64 via a native arm runner
-          # (ubuntu-24.04-arm) + manifest merge when someone needs it; qemu
-          # cross-builds of the rust stage are painfully slow.
-          platforms: linux/amd64
-          tags: |
-            ghcr.io/${{ github.repository }}-server:${{ github.ref_name }}
-            ghcr.io/${{ github.repository }}-server:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          platforms: linux/${{ matrix.arch }}
+          tags: ghcr.io/${{ github.repository }}-server:${{ github.ref_name }}-${{ matrix.arch }}
+          cache-from: type=gha,scope=${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
+
+  image-manifest:
+    needs: image
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    steps:
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Create multi-arch manifest
+        run: |
+          img=ghcr.io/${{ github.repository }}-server
+          docker buildx imagetools create \
+            -t "$img:${{ github.ref_name }}" -t "$img:latest" \
+            "$img:${{ github.ref_name }}-amd64" "$img:${{ github.ref_name }}-arm64"
