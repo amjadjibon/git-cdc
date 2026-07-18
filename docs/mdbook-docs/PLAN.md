@@ -21,18 +21,18 @@ first, reference later.
 
 ## Phase 1: skeleton + chapters
 
-- [ ] **1.1** `docs/book/book.toml` + `src/SUMMARY.md`: Introduction ·
+- [x] **1.1** `docs/book/book.toml` + `src/SUMMARY.md`: Introduction ·
   Getting Started · How It Works · Configuration · Serverless S3 ·
   Running a Server · Garbage Collection · Command Reference ·
   Manifest Spec (included) · Development.
-- [ ] **1.2** Write the chapters (substantive, reusing existing prose and
+- [x] **1.2** Write the chapters (substantive, reusing existing prose and
   examples; each chapter standalone-readable).
   *Done when*: `mdbook build docs/book` succeeds with no missing-file
   warnings.
 
 ## Phase 2: wire-up + docs
 
-- [ ] **2.1** Gitignore build output; README gets a "Documentation" section
+- [x] **2.1** Gitignore build output; README gets a "Documentation" section
   (`mdbook serve docs/book`).
   *Done when*: `git status` clean after a build; README links the book.
 
