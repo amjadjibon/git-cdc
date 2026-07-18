@@ -228,7 +228,7 @@ fn full_push_clone_pull_gc_cycle() {
     let remote = tmp.path().join("remote.git");
     git(
         tmp.path(),
-        &["init", "-q", "--bare", &remote.to_string_lossy()],
+        &["init", "-q", "-b", "main", "--bare", &remote.to_string_lossy()],
     );
     git(
         &repo,
