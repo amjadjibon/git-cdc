@@ -2,8 +2,12 @@
 //! the `fs` scheme in a tempdir — exercises the store logic; service-specific
 //! transport (azblob, gcs, sftp, ...) is OpenDAL's contract, not ours.
 
+use std::time::Duration;
+
+use git_cdc_core::protocol::{GcRequest, GcResponse};
 use git_cdc_core::store::envelope;
 use git_cdc_core::store::opendal::{OpendalConfig, OpendalStore};
+use git_cdc_server::{AppState, Backend, app};
 
 fn fs_store(root: &std::path::Path) -> OpendalStore {
     OpendalStore::connect(&OpendalConfig {
@@ -67,4 +71,69 @@ async fn upload_poisoning_guards() {
     // Nothing was admitted.
     assert!(!store.has(&hash).await.unwrap());
     assert!(store.list().await.unwrap().is_empty());
+}
+
+/// The server end-to-end over Backend::Opendal: upload, download, GC —
+/// exercises every enum arm through the HTTP layer.
+#[tokio::test]
+async fn server_round_trip_and_gc_over_opendal() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = AppState {
+        backend: Backend::Opendal(fs_store(dir.path())),
+        token: "test-token".into(),
+        grace: Duration::ZERO,
+        upload_times: Default::default(),
+    };
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    tokio::spawn(async move {
+        axum::serve(listener, app(state)).await.unwrap();
+    });
+
+    let mut headers = reqwest::header::HeaderMap::new();
+    headers.insert("authorization", "Bearer test-token".parse().unwrap());
+    let c = reqwest::Client::builder()
+        .default_headers(headers)
+        .build()
+        .unwrap();
+
+    let data = b"opendal e2e chunk".to_vec();
+    let oid = format!("blake3:{}", blake3::hash(&data).to_hex());
+
+    let r = c
+        .put(format!("{base}/chunks/{oid}"))
+        .body(data.clone())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200);
+
+    let got = c
+        .get(format!("{base}/chunks/{oid}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(got.status(), 200);
+    assert_eq!(got.bytes().await.unwrap().as_ref(), &data[..]);
+
+    // GC with an empty live set removes it (list + remove arms).
+    let resp: GcResponse = c
+        .post(format!("{base}/gc"))
+        .json(&GcRequest {
+            live_oids: vec![],
+            dry_run: false,
+        })
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(resp.deleted, vec![oid.clone()]);
+    let gone = c
+        .get(format!("{base}/chunks/{oid}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(gone.status(), 404);
 }
