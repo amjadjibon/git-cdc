@@ -117,6 +117,49 @@ git-cdc-server --backend s3 --s3-bucket my-chunks \
   --token <secret>
 ```
 
+### Server with Azure, GCS, SFTP, FTP, Google Drive, WebDAV, OneDrive
+
+The `opendal` backend routes chunk storage through
+[Apache OpenDAL](https://opendal.apache.org/): pick a scheme and pass its
+options as repeatable `--opendal-option KEY=VALUE` flags (passed to OpenDAL
+verbatim — see the [service docs](https://docs.rs/opendal/latest/opendal/services/)
+for each scheme's keys):
+
+```sh
+# Azure Blob
+git-cdc-server --backend opendal --opendal-scheme azblob \
+  --opendal-option container=my-chunks \
+  --opendal-option account_name=me --opendal-option account_key=... \
+  --token <secret>
+
+# Google Cloud Storage
+git-cdc-server --backend opendal --opendal-scheme gcs \
+  --opendal-option bucket=my-chunks \
+  --opendal-option credential_path=/path/to/sa.json --token <secret>
+
+# Nextcloud (or any WebDAV server)
+git-cdc-server --backend opendal --opendal-scheme webdav \
+  --opendal-option endpoint=https://cloud.example.com/remote.php/dav/files/me \
+  --opendal-option username=me --opendal-option password=<app-password> \
+  --token <secret>
+
+# SFTP (unix only, SSH key auth only — no passwords)
+git-cdc-server --backend opendal --opendal-scheme sftp \
+  --opendal-option endpoint=ssh://me@host --opendal-option key=~/.ssh/id_ed25519 \
+  --token <secret>
+```
+
+`ftp`, `gdrive`, and `onedrive` work the same way. Google Drive and OneDrive
+need an OAuth `refresh_token` + `client_id` + `client_secret` (access-token-only
+setups expire after ~1h) and have API quotas that make them a "works, not
+recommended" tier for chunk traffic. Plain `ftp` sends credentials in the
+clear — prefer FTPS or anything else on this list.
+
+Chunks land under `--opendal-prefix` (default `chunks/`). Alternatively, skip
+all of this: `rclone serve s3 remote:` fronts every one of these services with
+an S3 API, and the existing `--backend s3` (or serverless mode) works against
+it unchanged.
+
 Cloning:
 
 ```sh

@@ -2,14 +2,15 @@ use std::time::SystemTime;
 
 use anyhow::Result;
 use git_cdc_core::store::s3::S3Store;
-use git_cdc_core::store::{ChunkStore, DiskStore};
+use git_cdc_core::store::{ChunkStore, DiskStore, OpendalStore};
 
-/// Server-side chunk storage. Two variants with one call site each — an
-/// enum, not a trait object (ponytail: async_trait machinery buys nothing
-/// at this scale; add it if a third backend ever appears).
+/// Server-side chunk storage. An enum, not a trait object — three variants
+/// with one call site each still doesn't justify async_trait machinery.
 pub enum Backend {
     Disk(DiskStore),
     S3(S3Store),
+    /// Everything else: azblob, gcs, sftp, ftp, gdrive, webdav, onedrive.
+    Opendal(OpendalStore),
 }
 
 impl Backend {
@@ -17,6 +18,7 @@ impl Backend {
         match self {
             Backend::Disk(s) => Ok(s.has(hash)),
             Backend::S3(s) => s.has(hash).await,
+            Backend::Opendal(s) => s.has(hash).await,
         }
     }
 
@@ -27,6 +29,7 @@ impl Backend {
         match self {
             Backend::Disk(s) => s.put_encoded(hash, &encoded),
             Backend::S3(s) => s.put_encoded(hash, encoded).await,
+            Backend::Opendal(s) => s.put_encoded(hash, encoded).await,
         }
     }
 
@@ -35,6 +38,7 @@ impl Backend {
         match self {
             Backend::Disk(s) => s.get_encoded(hash),
             Backend::S3(s) => s.get_encoded(hash).await,
+            Backend::Opendal(s) => s.get_encoded(hash).await,
         }
     }
 
@@ -42,6 +46,7 @@ impl Backend {
         match self {
             Backend::Disk(s) => s.remove(hash),
             Backend::S3(s) => s.remove(hash).await,
+            Backend::Opendal(s) => s.remove(hash).await,
         }
     }
 
@@ -60,6 +65,7 @@ impl Backend {
                 })
                 .collect()),
             Backend::S3(s) => s.list().await,
+            Backend::Opendal(s) => s.list().await,
         }
     }
 }

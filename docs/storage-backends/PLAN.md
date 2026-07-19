@@ -4,13 +4,13 @@ version: 1.0
 date_created: 2026-07-19
 last_updated: 2026-07-19
 owner: amjadjibon
-status: 'Planned'
+status: 'Completed'
 tags: [feature]
 ---
 
 # OpenDAL Storage Backends
 
-![Status: Planned](https://img.shields.io/badge/status-Planned-blue)
+![Status: Completed](https://img.shields.io/badge/status-Completed-brightgreen)
 
 Adds a third server backend, `opendal`, wrapping `opendal::Operator` so one store
 implementation serves Azure Blob, GCS, SFTP, FTP(S), Google Drive, WebDAV
@@ -37,12 +37,12 @@ enum variant.
 
 **Goal**: The whole feature — store, backend variant, CLI flags, tests, README.
 
-- [ ] TASK-001: Add `opendal = { version = "0.57", default-features = false, features = ["services-azblob", "services-gcs", "services-sftp", "services-ftp", "services-gdrive", "services-webdav", "services-onedrive", "services-fs"] }` to `crates/core/Cargo.toml`.
-- [ ] TASK-002: Create `crates/core/src/store/opendal.rs` with `OpendalConfig { scheme: String, options: Vec<(String, String)>, prefix: String }` and `OpendalStore` mirroring `S3Store`'s API (`connect`, `has`, `put`, `put_encoded`, `get`, `get_encoded`, `remove`, `list`), built via `opendal::Operator::via_iter(scheme, options)`. Keys are `{prefix}{hex}`; `list` maps entry `last_modified()` to `SystemTime` and skips non-hash keys. Export from `crates/core/src/store/mod.rs`.
-- [ ] TASK-003: Add `Backend::Opendal(OpendalStore)` arm to `crates/server/src/backend.rs` for all five methods.
-- [ ] TASK-004: Wire `--backend opendal` in `crates/server/src/main.rs`: `--opendal-scheme` (env `GIT_CDC_OPENDAL_SCHEME`, required for the backend), repeatable `--opendal-option KEY=VALUE`, `--opendal-prefix` (default `chunks/`); runtime bail when scheme is missing, matching the disk/s3 checks. Extend the existing arg-validation unit tests.
-- [ ] TASK-005: Add `crates/server/tests/opendal_backend.rs` running `OpendalStore` against the `fs` scheme in a tempdir: put/has/get round trip, hash-mismatch rejection, `put_encoded` envelope verification, `remove`, `list` returns the hash with a mtime and skips a planted foreign key.
-- [ ] TASK-006: README: document the `opendal` backend with example invocations for azblob, gcs, webdav/Nextcloud, sftp; note SFTP unix/key-only and Drive/OneDrive OAuth-refresh setup; add the `rclone serve s3` zero-code alternative.
+- [x] TASK-001: Add `opendal = { version = "0.57", default-features = false, features = ["services-azblob", "services-gcs", "services-sftp", "services-ftp", "services-gdrive", "services-webdav", "services-onedrive", "services-fs"] }` to `crates/core/Cargo.toml`.
+- [x] TASK-002: Create `crates/core/src/store/opendal.rs` with `OpendalConfig { scheme: String, options: Vec<(String, String)>, prefix: String }` and `OpendalStore` mirroring `S3Store`'s API (`connect`, `has`, `put`, `put_encoded`, `get`, `get_encoded`, `remove`, `list`), built via `opendal::Operator::via_iter(scheme, options)`. Keys are `{prefix}{hex}`; `list` maps entry `last_modified()` to `SystemTime` and skips non-hash keys. Export from `crates/core/src/store/mod.rs`.
+- [x] TASK-003: Add `Backend::Opendal(OpendalStore)` arm to `crates/server/src/backend.rs` for all five methods.
+- [x] TASK-004: Wire `--backend opendal` in `crates/server/src/main.rs`: `--opendal-scheme` (env `GIT_CDC_OPENDAL_SCHEME`, required for the backend), repeatable `--opendal-option KEY=VALUE`, `--opendal-prefix` (default `chunks/`); runtime bail when scheme is missing, matching the disk/s3 checks. Extend the existing arg-validation unit tests.
+- [x] TASK-005: Add `crates/server/tests/opendal_backend.rs` running `OpendalStore` against the `fs` scheme in a tempdir: put/has/get round trip, hash-mismatch rejection, `put_encoded` envelope verification, `remove`, `list` returns the hash with a mtime and skips a planted foreign key.
+- [x] TASK-006: README: document the `opendal` backend with example invocations for azblob, gcs, webdav/Nextcloud, sftp; note SFTP unix/key-only and Drive/OneDrive OAuth-refresh setup; add the `rclone serve s3` zero-code alternative.
 
 **Completion criteria**: `cargo test --workspace` passes including the new `opendal_backend` integration test; `cargo run -p git-cdc-server -- --backend opendal --token t` fails with a clear "scheme required" error and succeeds with `--opendal-scheme fs --opendal-option root=/tmp/x`.
 
@@ -79,8 +79,8 @@ Do NOT push, open PRs, or modify PLAN.md.
 
 ## 3. Testing
 
-- [ ] TEST-001: `crates/server/tests/opendal_backend.rs` — fs-scheme round trip, poisoning guards, list mtime + foreign-key skip (TASK-005).
-- [ ] TEST-002: `crates/server/src/main.rs` unit tests — `--backend opendal` requires `--opendal-scheme`; option parsing splits `KEY=VALUE`.
+- [x] TEST-001: `crates/server/tests/opendal_backend.rs` — fs-scheme round trip, poisoning guards, list mtime + foreign-key skip (TASK-005).
+- [x] TEST-002: `crates/server/src/main.rs` unit tests — `--backend opendal` requires `--opendal-scheme`; option parsing splits `KEY=VALUE`.
 
 ## 4. Risks & Assumptions
 

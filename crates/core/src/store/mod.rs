@@ -3,9 +3,11 @@
 
 pub mod disk;
 pub mod envelope;
+pub mod opendal;
 pub mod s3;
 
 pub use disk::DiskStore;
+pub use opendal::{OpendalConfig, OpendalStore};
 pub use s3::{S3Config, S3Store, make_client};
 
 use anyhow::Result;
