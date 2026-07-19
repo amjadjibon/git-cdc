@@ -531,7 +531,7 @@ impl Drop for SshRemote {
 enum Remote {
     Http(git_cdc_core::client::Client),
     S3 {
-        store: git_cdc_core::store::s3::S3Store,
+        store: git_cdc_core::store::OpendalStore,
         rt: tokio::runtime::Runtime,
     },
     Ssh(SshRemote),
@@ -550,7 +550,7 @@ fn remote() -> Result<Remote> {
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()?;
-        let store = rt.block_on(git_cdc_core::store::s3::S3Store::connect(&config));
+        let store = config.connect()?;
         return Ok(Remote::S3 { store, rt });
     }
     // cdc.ssh.command (advanced/testing) overrides the ssh invocation with

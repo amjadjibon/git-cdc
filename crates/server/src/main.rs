@@ -2,8 +2,7 @@ use std::time::Duration;
 
 use anyhow::bail;
 use clap::{Parser, ValueEnum};
-use git_cdc_core::store::s3::{S3Config, S3Store};
-use git_cdc_core::store::{DiskStore, OpendalConfig, OpendalStore};
+use git_cdc_core::store::{DiskStore, OpendalConfig, OpendalStore, S3Config};
 use git_cdc_server::{AppState, Backend, app};
 
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -85,14 +84,14 @@ async fn main() -> anyhow::Result<()> {
             let Some(bucket) = args.s3_bucket else {
                 bail!("--s3-bucket is required for the s3 backend")
             };
-            Backend::S3(
-                S3Store::connect(&S3Config {
+            Backend::Opendal(
+                S3Config {
                     bucket,
                     prefix: args.s3_prefix,
                     endpoint: args.s3_endpoint,
                     force_path_style: args.s3_force_path_style,
-                })
-                .await,
+                }
+                .connect()?,
             )
         }
         BackendKind::Opendal => {

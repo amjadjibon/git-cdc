@@ -66,8 +66,9 @@ git push                        # pre-push hook uploads chunks first, automatica
 ### Serverless mode (S3, no server)
 
 Skip the server entirely and let the CLI talk straight to an S3-compatible
-bucket (AWS S3, MinIO, R2) — credentials come from the standard AWS chain
-(env vars, `~/.aws`, IMDS), so IAM replaces the bearer token:
+bucket (AWS S3, MinIO, R2) — credentials come from the standard AWS
+sources (env vars, `~/.aws` config files, IMDS; SSO sessions are not
+supported), so IAM replaces the bearer token:
 
 ```sh
 git cdc install
