@@ -2,6 +2,7 @@
 //! and the S3-compatible `S3Store` (server s3 backend + serverless CLI).
 
 pub mod disk;
+pub mod envelope;
 pub mod s3;
 
 pub use disk::DiskStore;

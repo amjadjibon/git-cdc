@@ -145,14 +145,16 @@ async fn put_chunk(
     let Ok(hash) = parse_hash(&oid) else {
         return (StatusCode::UNPROCESSABLE_ENTITY, "invalid oid").into_response();
     };
-    if blake3::hash(&body) != hash {
+    // The body is an envelope (or a legacy raw chunk); decoding verifies
+    // the uncompressed hash — the upload-poisoning guard.
+    if git_cdc_core::store::envelope::decode(&body, &hash).is_err() {
         return (
             StatusCode::UNPROCESSABLE_ENTITY,
-            "body does not hash to the given oid",
+            "body does not decode to the given oid",
         )
             .into_response();
     }
-    match state.backend.put(&hash, &body).await {
+    match state.backend.put_encoded(&hash, body.to_vec()).await {
         Ok(()) => {
             state
                 .upload_times
@@ -174,7 +176,7 @@ async fn get_chunk(State(state): State<Arc<AppState>>, Path(oid): Path<String>) 
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
         Ok(true) => {}
     }
-    match state.backend.get(&hash).await {
+    match state.backend.get_encoded(&hash).await {
         Ok(data) => data.into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }

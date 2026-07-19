@@ -28,7 +28,6 @@ Last scan: 2026-07-19 · 0 markers. Clean ledger.
 ## Related deferred scope (documented, unmarked)
 
 Not `ponytail:` markers, but deliberate v2 deferrals recorded in
-`docs/git-cdc-mvp/DESIGN.md` and the book's Development chapter: git
-transfer adapters / pre-signed URL offload, SSH
-transport, compression, per-branch ACLs via the batch `ref` field,
-constant-time token comparison.
+`docs/git-cdc-mvp/DESIGN.md`: transfer adapters / pre-signed URL offload,
+the filter-process `delay` capability, and per-branch ACLs via the batch
+`ref` field.

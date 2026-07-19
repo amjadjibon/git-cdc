@@ -40,6 +40,13 @@ Every read path re-verifies: chunk hashes on fetch and on smudge, the
 whole-file oid after reassembly. A corrupt chunk can fail a checkout but
 can never silently materialize wrong bytes.
 
+At rest and on the wire, chunks travel in a small **envelope** — zstd-
+compressed automatically when that saves more than ~5%, raw otherwise (so
+already-compressed media pays no decompress cost). Identity is always the
+uncompressed BLAKE3, so compression is invisible to manifests, dedup, and
+GC; pre-compression stores keep working. Format:
+`docs/spec/chunk-storage.md` in the repository.
+
 ## The filter pipeline
 
 git-cdc plugs into git's clean/smudge filter machinery, exactly like
