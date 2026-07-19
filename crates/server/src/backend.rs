@@ -1,22 +1,22 @@
 use std::time::SystemTime;
 
 use anyhow::Result;
-use git_cdc_core::store::s3::S3Store;
-use git_cdc_core::store::{ChunkStore, DiskStore};
+use git_cdc_core::store::{ChunkStore, DiskStore, OpendalStore};
 
-/// Server-side chunk storage. Two variants with one call site each — an
-/// enum, not a trait object (ponytail: async_trait machinery buys nothing
-/// at this scale; add it if a third backend ever appears).
+/// Server-side chunk storage. An enum, not a trait object — two variants
+/// with one call site each doesn't justify async_trait machinery.
 pub enum Backend {
     Disk(DiskStore),
-    S3(S3Store),
+    /// Everything remote: s3, azblob, gcs, sftp, ftp, gdrive, webdav,
+    /// onedrive (the s3 flags map onto this via `OpendalConfig::s3`).
+    Opendal(OpendalStore),
 }
 
 impl Backend {
     pub async fn has(&self, hash: &blake3::Hash) -> Result<bool> {
         match self {
             Backend::Disk(s) => Ok(s.has(hash)),
-            Backend::S3(s) => s.has(hash).await,
+            Backend::Opendal(s) => s.has(hash).await,
         }
     }
 
@@ -26,7 +26,7 @@ impl Backend {
     pub async fn put_encoded(&self, hash: &blake3::Hash, encoded: Vec<u8>) -> Result<()> {
         match self {
             Backend::Disk(s) => s.put_encoded(hash, &encoded),
-            Backend::S3(s) => s.put_encoded(hash, encoded).await,
+            Backend::Opendal(s) => s.put_encoded(hash, encoded).await,
         }
     }
 
@@ -34,14 +34,14 @@ impl Backend {
     pub async fn get_encoded(&self, hash: &blake3::Hash) -> Result<Vec<u8>> {
         match self {
             Backend::Disk(s) => s.get_encoded(hash),
-            Backend::S3(s) => s.get_encoded(hash).await,
+            Backend::Opendal(s) => s.get_encoded(hash).await,
         }
     }
 
     pub async fn remove(&self, hash: &blake3::Hash) -> Result<()> {
         match self {
             Backend::Disk(s) => s.remove(hash),
-            Backend::S3(s) => s.remove(hash).await,
+            Backend::Opendal(s) => s.remove(hash).await,
         }
     }
 
@@ -59,7 +59,7 @@ impl Backend {
                     (h, mtime)
                 })
                 .collect()),
-            Backend::S3(s) => s.list().await,
+            Backend::Opendal(s) => s.list().await,
         }
     }
 }

@@ -1,12 +1,13 @@
 //! Chunk storage: the `ChunkStore` trait, the local sharded `DiskStore`,
-//! and the S3-compatible `S3Store` (server s3 backend + serverless CLI).
+//! and the OpenDAL-backed `OpendalStore` (server s3/opendal backends +
+//! serverless CLI).
 
 pub mod disk;
 pub mod envelope;
-pub mod s3;
+pub mod opendal;
 
 pub use disk::DiskStore;
-pub use s3::{S3Config, S3Store, make_client};
+pub use opendal::{OpendalConfig, OpendalStore};
 
 use anyhow::Result;
 

@@ -2,14 +2,22 @@ use std::time::Duration;
 
 use anyhow::bail;
 use clap::{Parser, ValueEnum};
-use git_cdc_core::store::DiskStore;
-use git_cdc_core::store::s3::{S3Config, S3Store};
+use git_cdc_core::store::{DiskStore, OpendalConfig, OpendalStore};
 use git_cdc_server::{AppState, Backend, app};
 
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
 enum BackendKind {
     Disk,
     S3,
+    /// Any OpenDAL service: azblob, gcs, sftp, ftp, gdrive, webdav, onedrive
+    Opendal,
+}
+
+/// Split a `KEY=VALUE` --opendal-option argument.
+fn parse_key_value(s: &str) -> Result<(String, String), String> {
+    s.split_once('=')
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .ok_or_else(|| format!("expected KEY=VALUE, got '{s}'"))
 }
 
 #[derive(Parser)]
@@ -36,6 +44,21 @@ struct Args {
     /// Path-style addressing (required by MinIO)
     #[arg(long)]
     s3_force_path_style: bool,
+    /// OpenDAL service scheme (opendal backend), e.g. azblob, gcs, sftp,
+    /// ftp, gdrive, webdav, onedrive
+    #[arg(
+        long,
+        env = "GIT_CDC_OPENDAL_SCHEME",
+        required_if_eq("backend", "opendal")
+    )]
+    opendal_scheme: Option<String>,
+    /// Service option as KEY=VALUE (repeatable), passed to OpenDAL verbatim,
+    /// e.g. --opendal-option container=chunks --opendal-option account_name=me
+    #[arg(long = "opendal-option", value_parser = parse_key_value)]
+    opendal_options: Vec<(String, String)>,
+    /// Directory chunks live under (opendal backend)
+    #[arg(long, default_value = "chunks/")]
+    opendal_prefix: String,
     /// Static bearer token clients must present
     #[arg(long, env = "GIT_CDC_TOKEN")]
     token: String,
@@ -61,15 +84,22 @@ async fn main() -> anyhow::Result<()> {
             let Some(bucket) = args.s3_bucket else {
                 bail!("--s3-bucket is required for the s3 backend")
             };
-            Backend::S3(
-                S3Store::connect(&S3Config {
-                    bucket,
-                    prefix: args.s3_prefix,
-                    endpoint: args.s3_endpoint,
-                    force_path_style: args.s3_force_path_style,
-                })
-                .await,
-            )
+            Backend::Opendal(OpendalStore::connect(&OpendalConfig::s3(
+                bucket,
+                args.s3_prefix,
+                args.s3_endpoint,
+                args.s3_force_path_style,
+            ))?)
+        }
+        BackendKind::Opendal => {
+            let Some(scheme) = args.opendal_scheme else {
+                bail!("--opendal-scheme is required for the opendal backend")
+            };
+            Backend::Opendal(OpendalStore::connect(&OpendalConfig {
+                scheme,
+                options: args.opendal_options,
+                prefix: args.opendal_prefix,
+            })?)
         }
     };
     let state = AppState {
@@ -107,5 +137,41 @@ mod tests {
         // bail is the guard for the bare `--token t` invocation.
         let bare = Args::try_parse_from(["s", "--token", "t"]).unwrap();
         assert!(bare.root.is_none());
+    }
+
+    #[test]
+    fn opendal_backend_requires_scheme() {
+        assert!(Args::try_parse_from(["s", "--backend", "opendal", "--token", "t"]).is_err());
+        let ok = Args::try_parse_from([
+            "s",
+            "--backend",
+            "opendal",
+            "--opendal-scheme",
+            "fs",
+            "--opendal-option",
+            "root=/tmp/x",
+            "--token",
+            "t",
+        ])
+        .unwrap();
+        assert_eq!(
+            ok.opendal_options,
+            vec![("root".to_string(), "/tmp/x".to_string())]
+        );
+        // Malformed option is rejected at parse time.
+        assert!(
+            Args::try_parse_from([
+                "s",
+                "--backend",
+                "opendal",
+                "--opendal-scheme",
+                "fs",
+                "--opendal-option",
+                "no-equals",
+                "--token",
+                "t"
+            ])
+            .is_err()
+        );
     }
 }

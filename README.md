@@ -66,8 +66,11 @@ git push                        # pre-push hook uploads chunks first, automatica
 ### Serverless mode (S3, no server)
 
 Skip the server entirely and let the CLI talk straight to an S3-compatible
-bucket (AWS S3, MinIO, R2) — credentials come from the standard AWS chain
-(env vars, `~/.aws`, IMDS), so IAM replaces the bearer token:
+bucket (AWS S3, MinIO, R2) — credentials come from the standard AWS
+sources (env vars, `~/.aws` credentials, IMDS; SSO sessions are not
+supported), so IAM replaces the bearer token. The region comes from
+`AWS_REGION`/`AWS_DEFAULT_REGION` (the profile's region is not read),
+defaulting to `us-east-1`:
 
 ```sh
 git cdc install
@@ -116,6 +119,50 @@ git-cdc-server --backend s3 --s3-bucket my-chunks \
   --s3-endpoint http://127.0.0.1:9000 --s3-force-path-style \
   --token <secret>
 ```
+
+### Server with Azure, GCS, SFTP, FTP, Google Drive, WebDAV, OneDrive
+
+The `opendal` backend routes chunk storage through
+[Apache OpenDAL](https://opendal.apache.org/): pick a scheme and pass its
+options as repeatable `--opendal-option KEY=VALUE` flags (passed to OpenDAL
+verbatim — see the [service docs](https://docs.rs/opendal/latest/opendal/services/)
+for each scheme's keys):
+
+```sh
+# Azure Blob
+git-cdc-server --backend opendal --opendal-scheme azblob \
+  --opendal-option container=my-chunks \
+  --opendal-option account_name=me --opendal-option account_key=... \
+  --token <secret>
+
+# Google Cloud Storage
+git-cdc-server --backend opendal --opendal-scheme gcs \
+  --opendal-option bucket=my-chunks \
+  --opendal-option credential_path=/path/to/sa.json --token <secret>
+
+# Nextcloud (or any WebDAV server)
+git-cdc-server --backend opendal --opendal-scheme webdav \
+  --opendal-option endpoint=https://cloud.example.com/remote.php/dav/files/me \
+  --opendal-option username=me --opendal-option password=<app-password> \
+  --token <secret>
+
+# SFTP (unix only, SSH key auth only — no passwords)
+git-cdc-server --backend opendal --opendal-scheme sftp \
+  --opendal-option endpoint=ssh://me@host \
+  --opendal-option key=/home/me/.ssh/id_ed25519 \
+  --token <secret>
+```
+
+`ftp`, `gdrive`, and `onedrive` work the same way. Google Drive and OneDrive
+need an OAuth `refresh_token` + `client_id` + `client_secret` (access-token-only
+setups expire after ~1h) and have API quotas that make them a "works, not
+recommended" tier for chunk traffic. Plain `ftp` sends credentials in the
+clear — prefer FTPS or anything else on this list.
+
+Chunks land under `--opendal-prefix` (default `chunks/`). Alternatively, skip
+all of this: `rclone serve s3 remote:` fronts every one of these services with
+an S3 API, and the existing `--backend s3` (or serverless mode) works against
+it unchanged.
 
 Cloning:
 

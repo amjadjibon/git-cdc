@@ -6,7 +6,7 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-use git_cdc_core::store::s3::{S3Config, S3Store, make_client};
+use git_cdc_core::store::{OpendalConfig, OpendalStore};
 
 mod s3_fixture;
 
@@ -89,28 +89,31 @@ fn test_data(len: usize, seed: u64) -> Vec<u8> {
 
 #[test]
 fn serverless_push_clone_pull_gc() {
-    let (endpoint, _s3_dir) = s3_fixture::endpoint();
-    let config = S3Config {
-        bucket: BUCKET.into(),
-        prefix: "chunks/".into(),
-        endpoint: Some(endpoint.clone()),
-        force_path_style: true,
-    };
+    let (endpoint, s3_dir) = s3_fixture::endpoint();
+    let config = OpendalConfig::s3(
+        BUCKET.into(),
+        "chunks/".into(),
+        Some(endpoint.clone()),
+        true,
+    );
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .unwrap();
+    // s3s-fs buckets are directories under the fixture root; a real endpoint
+    // (GIT_CDC_TEST_S3_ENDPOINT) must have the bucket pre-created.
+    if let Some(dir) = &s3_dir {
+        fs::create_dir_all(dir.path().join(BUCKET)).unwrap();
+    }
     rt.block_on(async {
-        let client = make_client(&config).await;
-        let _ = client.create_bucket().bucket(BUCKET).send().await;
         // Empty the prefix so counts are deterministic across runs.
-        let store = S3Store::connect(&config).await;
+        let store = OpendalStore::connect(&config).unwrap();
         for (hash, _) in store.list().await.unwrap() {
             store.remove(&hash).await.unwrap();
         }
     });
     let count_bucket =
-        || rt.block_on(async { S3Store::connect(&config).await.list().await.unwrap().len() });
+        || rt.block_on(async { OpendalStore::connect(&config).unwrap().list().await.unwrap().len() });
 
     let tmp = tempfile::tempdir().unwrap();
 
