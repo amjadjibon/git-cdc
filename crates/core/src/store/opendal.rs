@@ -108,6 +108,9 @@ impl OpendalStore {
             };
             let mut modified = entry.metadata().last_modified();
             if modified.is_none() {
+                // ponytail: sequential stat per entry when a service's
+                // listing omits timestamps — batch/parallelize if GC over
+                // such a service ever gets slow.
                 modified = self
                     .op
                     .stat(entry.path())

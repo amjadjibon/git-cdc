@@ -145,7 +145,8 @@ git-cdc-server --backend opendal --opendal-scheme webdav \
 
 # SFTP (unix only, SSH key auth only — no passwords)
 git-cdc-server --backend opendal --opendal-scheme sftp \
-  --opendal-option endpoint=ssh://me@host --opendal-option key=~/.ssh/id_ed25519 \
+  --opendal-option endpoint=ssh://me@host \
+  --opendal-option key=/home/me/.ssh/id_ed25519 \
   --token <secret>
 ```
 
