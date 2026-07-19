@@ -231,7 +231,8 @@ write and read, and reassembled files are checked against the whole-file oid.
 
 ```text
 crates/
-├── core/     # git-cdc-core: chunker, manifest, chunk store, batch client + git-cdc CLI
+├── core/     # git-cdc-core: chunker, manifest, chunk store, batch client
+├── cli/      # git-cdc-cli: the `git-cdc` binary (filters, push/pull/gc, transports)
 └── server/   # git-cdc-server: axum batch API + chunk storage
 ```
 

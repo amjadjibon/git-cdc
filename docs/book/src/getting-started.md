@@ -7,7 +7,7 @@ Build from source (Rust toolchain required):
 ```sh
 git clone https://github.com/amjadjibon/git-cdc
 cd git-cdc
-cargo install --path crates/core      # installs `git-cdc` into ~/.cargo/bin
+cargo install --path crates/cli       # installs `git-cdc` into ~/.cargo/bin
 cargo install --path crates/server    # optional: `git-cdc-server`
 ```
 

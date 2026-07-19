@@ -4,8 +4,8 @@
 
 ```text
 crates/
-├── core/         # git-cdc-core: chunker, manifest, stores, protocol, CLI
-│   └── src/bin/git-cdc.rs
+├── core/         # git-cdc-core: chunker, manifest, stores, protocol, client
+├── cli/          # git-cdc-cli: the `git-cdc` binary (filters, push/pull/gc, transports)
 └── server/       # git-cdc-server: axum batch API over disk or S3
 docs/
 ├── book/         # this book (mdbook)

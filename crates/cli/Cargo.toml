@@ -1,0 +1,24 @@
+[package]
+name = "git-cdc-cli"
+version = "0.0.1"
+edition = "2024"
+
+[[bin]]
+name = "git-cdc"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+blake3 = { version = "1", features = ["std"] }
+clap = { version = "4.6.2", features = ["derive"] }
+git-cdc-core = { path = "../core" }
+tokio = { version = "1.52.4", features = ["rt"] }
+
+[dev-dependencies]
+axum = "0.8.9"
+git-cdc-server = { path = "../server" }
+hyper-util = "0.1.20"
+s3s = "0.14.1"
+s3s-fs = "0.14.1"
+tempfile = "3.27.0"
+tokio = { version = "1.52.4", features = ["rt-multi-thread", "net", "macros"] }

@@ -1227,21 +1227,32 @@ dependencies = [
 ]
 
 [[package]]
-name = "git-cdc-core"
+name = "git-cdc-cli"
 version = "0.0.1"
 dependencies = [
  "anyhow",
  "axum",
  "blake3",
  "clap",
- "criterion",
- "fastcdc",
+ "git-cdc-core",
  "git-cdc-server",
  "hyper-util",
- "opendal",
- "reqwest",
  "s3s",
  "s3s-fs",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
+name = "git-cdc-core"
+version = "0.0.1"
+dependencies = [
+ "anyhow",
+ "blake3",
+ "criterion",
+ "fastcdc",
+ "opendal",
+ "reqwest",
  "serde",
  "serde_json",
  "tempfile",
