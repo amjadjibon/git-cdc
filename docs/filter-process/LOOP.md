@@ -8,7 +8,7 @@ max_phases: 5
 max_agents: 3
 current_iteration: 1
 status: running
-last_review_base: ''
+last_review_base: '6dbd4e6'
 ---
 
 # Dev Loop: filter-process
@@ -17,7 +17,7 @@ last_review_base: ''
 
 | Iter | Verdict | Crit | High | Med | Low | Mode | Action |
 |------|---------|------|------|-----|-----|------|--------|
-| 1    | —       | —    | —    | —   | —   | —    | —      |
+| 1    | Approve | 0    | 0    | 0   | 2   | lite | clean exit — awaiting approval |
 
 ## Stacked PRs
 
@@ -33,7 +33,7 @@ last_review_base: ''
 ## Log
 
 ### Iteration 1
-- [ ] dev-implement-plan
-- [ ] dev-qa
-- [ ] dev-code-review
-- [ ] decide
+- [x] dev-implement-plan
+- [x] dev-qa
+- [x] dev-code-review
+- [x] decide → clean exit, awaiting user approval
