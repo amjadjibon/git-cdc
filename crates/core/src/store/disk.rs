@@ -68,6 +68,30 @@ impl ChunkStore for DiskStore {
         if blake3::hash(data) != *hash {
             bail!("chunk data does not match hash {}", hash.to_hex());
         }
+        self.write_object(hash, &super::envelope::encode(data))
+    }
+
+    fn get(&self, hash: &blake3::Hash) -> Result<Vec<u8>> {
+        super::envelope::decode(&self.get_encoded(hash)?, hash)
+    }
+}
+
+impl DiskStore {
+    /// Store an already-enveloped object after verifying it (server upload
+    /// path: what arrived on the wire is written verbatim, no re-compress).
+    pub fn put_encoded(&self, hash: &blake3::Hash, encoded: &[u8]) -> Result<()> {
+        super::envelope::decode(encoded, hash)?;
+        self.write_object(hash, encoded)
+    }
+
+    /// The enveloped bytes as stored (download path — decode is the
+    /// receiver's job).
+    pub fn get_encoded(&self, hash: &blake3::Hash) -> Result<Vec<u8>> {
+        fs::read(self.path_for(hash))
+            .with_context(|| format!("chunk {} not in store", hash.to_hex()))
+    }
+
+    fn write_object(&self, hash: &blake3::Hash, bytes: &[u8]) -> Result<()> {
         let path = self.path_for(hash);
         if path.is_file() {
             return Ok(()); // content-addressed: already have identical bytes
@@ -78,18 +102,9 @@ impl ChunkStore for DiskStore {
         // half-written chunk that has() reports present. Unique temp name so
         // concurrent double-puts of the same chunk don't clobber each other.
         let tmp = dir.join(format!(".tmp-{}-{}", std::process::id(), hash.to_hex()));
-        fs::write(&tmp, data).context("writing chunk temp file")?;
+        fs::write(&tmp, bytes).context("writing chunk temp file")?;
         fs::rename(&tmp, &path).context("committing chunk")?;
         Ok(())
-    }
-
-    fn get(&self, hash: &blake3::Hash) -> Result<Vec<u8>> {
-        let data = fs::read(self.path_for(hash))
-            .with_context(|| format!("chunk {} not in store", hash.to_hex()))?;
-        if blake3::hash(&data) != *hash {
-            bail!("chunk {} is corrupt on disk", hash.to_hex());
-        }
-        Ok(data)
     }
 }
 
@@ -148,6 +163,24 @@ mod tests {
         fs::write(shard.join(".tmp-999-deadbeef"), b"partial").unwrap();
         fs::write(shard.join("not-a-hash"), b"junk").unwrap();
         assert_eq!(s.list().unwrap(), vec![hash]);
+    }
+
+    #[test]
+    fn legacy_bare_chunk_files_still_read() {
+        // A store written before the envelope existed holds bare chunk
+        // bytes; get() must keep serving them.
+        let (_dir, s) = store();
+        let data = b"pre-envelope chunk".to_vec();
+        let hash = blake3::hash(&data);
+        let path = s.path_for(&hash);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, &data).unwrap();
+        assert!(s.has(&hash));
+        assert_eq!(s.get(&hash).unwrap(), data);
+        // And the wire accepts legacy raw bodies too (old client, new server).
+        let (_dir2, s2) = store();
+        s2.put_encoded(&hash, &data).unwrap();
+        assert_eq!(s2.get(&hash).unwrap(), data);
     }
 
     #[test]

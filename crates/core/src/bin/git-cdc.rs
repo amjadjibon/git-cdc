@@ -36,6 +36,12 @@ enum Cmd {
     /// Long-running clean+smudge filter (gitattributes filter-process protocol)
     #[command(hide = true)]
     FilterProcess,
+    /// Serve a chunk store over stdin/stdout (the far end of ssh transport)
+    #[command(hide = true)]
+    Stdio {
+        #[arg(long)]
+        root: PathBuf,
+    },
     /// Fetch chunks for the current checkout and materialize tracked files
     Pull,
     /// Upload chunks referenced by any local manifest ahead of `git push`
@@ -60,6 +66,7 @@ fn main() -> Result<()> {
         Cmd::Clean => cmd_clean(),
         Cmd::Smudge => cmd_smudge(),
         Cmd::FilterProcess => cmd_filter_process(),
+        Cmd::Stdio { root } => cmd_stdio(&root),
         Cmd::Pull => cmd_pull(),
         Cmd::Push => cmd_push(),
         Cmd::Gc {
@@ -347,14 +354,187 @@ fn cmd_filter_process() -> Result<()> {
     }
 }
 
-/// Where chunks live remotely: a git-cdc-server (batch API) or, serverless,
-/// an S3 bucket the CLI talks to directly with IAM credentials.
+/// Serve the chunk store over stdin/stdout (RESEARCH protocol v1) — the
+/// far end of `ssh <host> git-cdc stdio --root <path>`, the same model as
+/// git's own upload-pack.
+fn cmd_stdio(root: &std::path::Path) -> Result<()> {
+    use git_cdc_core::pktline::{PktReader, PktWriter, read_text, write_flush, write_text};
+
+    let store = DiskStore::new(root);
+    let mut input = std::io::stdin().lock();
+    let mut output = std::io::stdout().lock();
+
+    match read_text(&mut input)?.as_deref() {
+        Some("git-cdc-stdio version=1") => {}
+        other => bail!("unexpected stdio client greeting: {other:?}"),
+    }
+    write_text(&mut output, "ok")?;
+    output.flush()?;
+
+    loop {
+        let line = match read_text(&mut input) {
+            Ok(Some(line)) => line,
+            Ok(None) => continue, // stray flush
+            Err(e)
+                if e.downcast_ref::<std::io::Error>()
+                    .is_some_and(|io| io.kind() == std::io::ErrorKind::UnexpectedEof) =>
+            {
+                return Ok(()); // client hung up: session over
+            }
+            Err(e) => return Err(e),
+        };
+        let (cmd, arg) = line.split_once(' ').unwrap_or((line.as_str(), ""));
+        match cmd {
+            "has" => {
+                let hash = blake3::Hash::from_hex(arg)?;
+                write_text(&mut output, if store.has(&hash) { "yes" } else { "no" })?;
+            }
+            "put" => {
+                let hash = blake3::Hash::from_hex(arg)?;
+                let mut encoded = Vec::new();
+                PktReader::new(&mut input).read_to_end(&mut encoded)?;
+                match store.put_encoded(&hash, &encoded) {
+                    Ok(()) => write_text(&mut output, "ok")?,
+                    Err(e) => write_text(&mut output, &format!("err {e:#}"))?,
+                }
+            }
+            "get" => {
+                let hash = blake3::Hash::from_hex(arg)?;
+                match store.get_encoded(&hash) {
+                    Ok(encoded) => {
+                        write_text(&mut output, "ok")?;
+                        PktWriter::new(&mut output).write_all(&encoded)?;
+                        write_flush(&mut output)?;
+                    }
+                    Err(_) => write_text(&mut output, "err not-found")?,
+                }
+            }
+            "list" => {
+                for hash in store.list()? {
+                    let mtime = fs::metadata(store.path_for(&hash))
+                        .and_then(|m| m.modified())
+                        .ok()
+                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                        .map(|d| d.as_secs().to_string())
+                        .unwrap_or_else(|| "-".into());
+                    write_text(&mut output, &format!("chunk {} {mtime}", hash.to_hex()))?;
+                }
+                write_flush(&mut output)?;
+            }
+            "remove" => {
+                let hash = blake3::Hash::from_hex(arg)?;
+                store.remove(&hash)?;
+                write_text(&mut output, "ok")?;
+            }
+            other => bail!("unknown stdio command {other:?}"),
+        }
+        output.flush()?;
+    }
+}
+
+/// Client half of the stdio protocol: a spawned transport process
+/// (normally ssh) with pkt-line request/response over its pipes.
+struct SshRemote {
+    child: std::process::Child,
+    to: std::io::BufWriter<std::process::ChildStdin>,
+    from: std::io::BufReader<std::process::ChildStdout>,
+}
+
+impl SshRemote {
+    fn connect(argv: &[String]) -> Result<SshRemote> {
+        use git_cdc_core::pktline::{read_text, write_text};
+        let mut child = Git::new(&argv[0])
+            .args(&argv[1..])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .with_context(|| format!("spawning ssh transport {argv:?}"))?;
+        let mut to = std::io::BufWriter::new(child.stdin.take().unwrap());
+        let mut from = std::io::BufReader::new(child.stdout.take().unwrap());
+        write_text(&mut to, "git-cdc-stdio version=1")?;
+        to.flush()?;
+        match read_text(&mut from)?.as_deref() {
+            Some("ok") => Ok(SshRemote { child, to, from }),
+            other => bail!(
+                "ssh remote did not answer the git-cdc handshake (got {other:?}) — \
+                 is git-cdc installed on the remote host?"
+            ),
+        }
+    }
+
+    fn expect_ok(&mut self) -> Result<()> {
+        use git_cdc_core::pktline::read_text;
+        match read_text(&mut self.from)?.as_deref() {
+            Some("ok") => Ok(()),
+            Some(err) => bail!("ssh remote: {err}"),
+            None => bail!("ssh remote closed the stream"),
+        }
+    }
+
+    fn put_encoded(&mut self, hash: &blake3::Hash, encoded: &[u8]) -> Result<()> {
+        use git_cdc_core::pktline::{PktWriter, write_flush, write_text};
+        write_text(&mut self.to, &format!("put {}", hash.to_hex()))?;
+        PktWriter::new(&mut self.to).write_all(encoded)?;
+        write_flush(&mut self.to)?;
+        self.expect_ok()
+    }
+
+    fn get_encoded(&mut self, hash: &blake3::Hash) -> Result<Vec<u8>> {
+        use git_cdc_core::pktline::{PktReader, write_text};
+        write_text(&mut self.to, &format!("get {}", hash.to_hex()))?;
+        self.to.flush()?;
+        self.expect_ok()
+            .with_context(|| format!("fetching {}", hash.to_hex()))?;
+        let mut encoded = Vec::new();
+        PktReader::new(&mut self.from).read_to_end(&mut encoded)?;
+        Ok(encoded)
+    }
+
+    fn list(&mut self) -> Result<Vec<(blake3::Hash, Option<std::time::SystemTime>)>> {
+        use git_cdc_core::pktline::{read_text, write_text};
+        write_text(&mut self.to, "list")?;
+        self.to.flush()?;
+        let mut out = Vec::new();
+        while let Some(line) = read_text(&mut self.from)? {
+            let mut parts = line.split(' ');
+            let (Some("chunk"), Some(hex), Some(mtime)) =
+                (parts.next(), parts.next(), parts.next())
+            else {
+                bail!("bad list line from ssh remote: {line:?}");
+            };
+            let modified = mtime
+                .parse::<u64>()
+                .ok()
+                .map(|s| std::time::UNIX_EPOCH + std::time::Duration::from_secs(s));
+            out.push((blake3::Hash::from_hex(hex)?, modified));
+        }
+        Ok(out)
+    }
+
+    fn remove(&mut self, hash: &blake3::Hash) -> Result<()> {
+        use git_cdc_core::pktline::write_text;
+        write_text(&mut self.to, &format!("remove {}", hash.to_hex()))?;
+        self.to.flush()?;
+        self.expect_ok()
+    }
+}
+
+impl Drop for SshRemote {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+/// Where chunks live remotely: a git-cdc-server (batch API), an S3 bucket
+/// (IAM credentials), or a host reachable over ssh with git-cdc installed.
 enum Remote {
     Http(git_cdc_core::client::Client),
     S3 {
         store: git_cdc_core::store::s3::S3Store,
         rt: tokio::runtime::Runtime,
     },
+    Ssh(SshRemote),
 }
 
 fn remote() -> Result<Remote> {
@@ -373,9 +553,27 @@ fn remote() -> Result<Remote> {
         let store = rt.block_on(git_cdc_core::store::s3::S3Store::connect(&config));
         return Ok(Remote::S3 { store, rt });
     }
+    // cdc.ssh.command (advanced/testing) overrides the ssh invocation with
+    // an arbitrary argv, whitespace-split.
+    if let Ok(command) = git_out(&["config", "--get", "cdc.ssh.command"]) {
+        let argv: Vec<String> = command.split_whitespace().map(String::from).collect();
+        if argv.is_empty() {
+            bail!("cdc.ssh.command is set but empty");
+        }
+        return Ok(Remote::Ssh(SshRemote::connect(&argv)?));
+    }
+    if let Ok(host) = git_out(&["config", "--get", "cdc.ssh.remote"]) {
+        let path = git_out(&["config", "--get", "cdc.ssh.path"])
+            .context("cdc.ssh.path is not configured (chunk root on the remote host)")?;
+        let argv: Vec<String> = ["ssh", &host, "git-cdc", "stdio", "--root", &path]
+            .into_iter()
+            .map(String::from)
+            .collect();
+        return Ok(Remote::Ssh(SshRemote::connect(&argv)?));
+    }
     let url = git_out(&["config", "--get", "cdc.url"]).context(
-        "no remote configured; set cdc.url + cdc.token (server) \
-         or cdc.s3.bucket (serverless S3)",
+        "no remote configured; set cdc.url + cdc.token (server), \
+         cdc.s3.bucket (serverless S3), or cdc.ssh.remote + cdc.ssh.path (ssh)",
     )?;
     let token = git_out(&["config", "--get", "cdc.token"])
         .context("cdc.token is not configured; set it with `git config cdc.token <token>`")?;
@@ -528,7 +726,7 @@ fn cmd_push() -> Result<()> {
                                 let Some((href, hash)) = pending.get(i) else {
                                     return Ok(());
                                 };
-                                client.upload(href, store.get(hash)?)?;
+                                client.upload(href, store.get_encoded(hash)?)?;
                             }
                         })
                     })
@@ -549,14 +747,34 @@ fn cmd_push() -> Result<()> {
                 if present.contains(hash) {
                     continue;
                 }
-                let data = store.get(hash).with_context(|| {
+                let data = store.get_encoded(hash).with_context(|| {
                     format!("bucket needs {} but it is not in the local store — run `git cdc pull` first", oid_str(hash))
                 })?;
-                s3.put(hash, &data).await?;
+                s3.put_encoded(hash, data).await?;
                 uploaded += 1;
             }
             anyhow::Ok(uploaded)
         })?,
+        Remote::Ssh(mut ssh) => {
+            // Same shape as S3: one listing, then upload the diff.
+            let present: std::collections::HashSet<blake3::Hash> =
+                ssh.list()?.into_iter().map(|(h, _)| h).collect();
+            let mut uploaded = 0usize;
+            for hash in chunks.keys() {
+                if present.contains(hash) {
+                    continue;
+                }
+                let data = store.get_encoded(hash).with_context(|| {
+                    format!(
+                        "ssh remote needs {} but it is not in the local store — run `git cdc pull` first",
+                        oid_str(hash)
+                    )
+                })?;
+                ssh.put_encoded(hash, &data)?;
+                uploaded += 1;
+            }
+            uploaded
+        }
     };
     eprintln!(
         "git-cdc: pushed {uploaded} of {total} chunks ({} already remote)",
@@ -611,16 +829,22 @@ fn cmd_pull() -> Result<()> {
                         .href;
                     let hash = git_cdc_core::manifest::parse_hash(&obj.oid)?;
                     let data = client.download(href)?;
-                    store.put(&hash, &data)?; // verifies hash before admitting
+                    store.put_encoded(&hash, &data)?; // decodes envelope, verifies hash
                 }
             }
             Remote::S3 { store: s3, rt } => rt.block_on(async {
                 for hash in missing.keys() {
-                    let data = s3.get(hash).await?; // verifies hash on read
-                    store.put(hash, &data)?;
+                    let data = s3.get_encoded(hash).await?;
+                    store.put_encoded(hash, &data)?; // decodes envelope, verifies hash
                 }
                 anyhow::Ok(())
             })?,
+            Remote::Ssh(mut ssh) => {
+                for hash in missing.keys() {
+                    let data = ssh.get_encoded(hash)?;
+                    store.put_encoded(hash, &data)?; // decodes envelope, verifies hash
+                }
+            }
         }
         eprintln!("git-cdc: fetched {} chunks", missing.len());
     }
@@ -724,6 +948,31 @@ fn cmd_gc(dry_run: bool, grace_secs: u64) -> Result<()> {
             })?;
             eprintln!(
                 "git-cdc: bucket gc {} {deleted} chunks ({kept_live} live, {kept_grace} in grace period)",
+                if dry_run { "would remove" } else { "removed" },
+            );
+        }
+        Ok(Remote::Ssh(mut ssh)) => {
+            // Like S3: no server owns the sweep — CLI grace + remote mtimes.
+            let (mut deleted, mut kept_live, mut kept_grace) = (0usize, 0usize, 0usize);
+            for (hash, modified) in ssh.list()? {
+                if live.contains(&hash) {
+                    kept_live += 1;
+                    continue;
+                }
+                let old_enough = modified
+                    .and_then(|mtime| now.duration_since(mtime).ok())
+                    .is_some_and(|age| age >= grace);
+                if !old_enough {
+                    kept_grace += 1;
+                    continue;
+                }
+                if !dry_run {
+                    ssh.remove(&hash)?;
+                }
+                deleted += 1;
+            }
+            eprintln!(
+                "git-cdc: ssh gc {} {deleted} chunks ({kept_live} live, {kept_grace} in grace period)",
                 if dry_run { "would remove" } else { "removed" },
             );
         }

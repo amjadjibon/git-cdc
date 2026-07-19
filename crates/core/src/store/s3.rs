@@ -74,16 +74,22 @@ impl S3Store {
     }
 
     /// Verifies `blake3(data) == hash` before admitting — same guard as
-    /// `DiskStore::put`.
+    /// `DiskStore::put`. Objects land as envelopes (compressed when it pays).
     pub async fn put(&self, hash: &blake3::Hash, data: &[u8]) -> Result<()> {
         if blake3::hash(data) != *hash {
             bail!("chunk data does not match hash {}", hash.to_hex());
         }
+        self.put_encoded(hash, super::envelope::encode(data)).await
+    }
+
+    /// Store an already-enveloped object after verifying it.
+    pub async fn put_encoded(&self, hash: &blake3::Hash, encoded: Vec<u8>) -> Result<()> {
+        super::envelope::decode(&encoded, hash)?;
         self.client
             .put_object()
             .bucket(&self.bucket)
             .key(self.key(hash))
-            .body(aws_sdk_s3::primitives::ByteStream::from(data.to_vec()))
+            .body(aws_sdk_s3::primitives::ByteStream::from(encoded))
             .send()
             .await
             .context("s3 put_object")?;
@@ -91,6 +97,11 @@ impl S3Store {
     }
 
     pub async fn get(&self, hash: &blake3::Hash) -> Result<Vec<u8>> {
+        super::envelope::decode(&self.get_encoded(hash).await?, hash)
+    }
+
+    /// The enveloped bytes as stored.
+    pub async fn get_encoded(&self, hash: &blake3::Hash) -> Result<Vec<u8>> {
         let resp = self
             .client
             .get_object()
@@ -99,16 +110,12 @@ impl S3Store {
             .send()
             .await
             .with_context(|| format!("chunk {} not in s3 store", hash.to_hex()))?;
-        let data = resp
+        Ok(resp
             .body
             .collect()
             .await
             .context("reading s3 body")?
-            .to_vec();
-        if blake3::hash(&data) != *hash {
-            bail!("chunk {} is corrupt in s3", hash.to_hex());
-        }
-        Ok(data)
+            .to_vec())
     }
 
     pub async fn remove(&self, hash: &blake3::Hash) -> Result<()> {

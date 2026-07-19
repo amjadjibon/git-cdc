@@ -81,6 +81,31 @@ git cdc track '*.dat'
 `push`/`pull`/`gc` then negotiate against the bucket directly (one listing
 instead of a batch call). If `cdc.s3.bucket` is set it wins over `cdc.url`.
 
+### SSH transport (no server, no bucket)
+
+Any host you can ssh into (with `git-cdc` installed there) can hold the
+chunks — the same model as git itself over SSH:
+
+```sh
+git cdc install
+git config cdc.ssh.remote user@host
+git config cdc.ssh.path /srv/cdc-chunks
+git cdc track '*.dat'
+```
+
+The CLI runs `ssh user@host git-cdc stdio --root /srv/cdc-chunks` and
+speaks a pkt-line protocol over the pipe; your ssh config (keys, agents,
+jump hosts) applies as-is. Precedence: `cdc.s3.bucket` >
+`cdc.ssh.remote` > `cdc.url`.
+
+### Compression
+
+Chunks are stored and transferred zstd-compressed automatically whenever
+it saves more than ~5% — already-compressed media (PNG, MP4) is detected
+and kept raw. Identity stays the uncompressed BLAKE3, so manifests, dedup,
+and existing stores are unaffected (pre-compression stores keep working).
+Format: [docs/spec/chunk-storage.md](docs/spec/chunk-storage.md).
+
 ### Server with S3 storage
 
 The server itself can also store chunks in a bucket instead of local disk —
@@ -195,5 +220,5 @@ cargo test --workspace
 ```
 
 Design and plan documents live in [`docs/`](docs/). Out of scope so far
-(see the plans): transfer adapters /
-pre-signed URL offload, SSH transport, and compression.
+(see the plans): transfer adapters / pre-signed URL offload and the
+filter-process `delay` capability.

@@ -28,6 +28,12 @@
 # 	endpoint = http://127.0.0.1:9000     ; MinIO/RustFS/R2 only — omit for AWS
 # 	force-path-style = true              ; MinIO only
 
+# Mode 3: SSH — chunks on any host you can ssh into (git-cdc must be
+# installed there). Access control is your ssh keys + file permissions.
+# [cdc "ssh"]
+# 	remote = user@host
+# 	path = /srv/cdc-chunks
+
 # --- Chunking (optional) -----------------------------------------------
 # Defaults: min 512 KiB, avg 2 MiB, max 8 MiB. Prefer setting these
 # repo-locally: every client of a repo should chunk with the same values,

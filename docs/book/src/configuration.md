@@ -13,6 +13,12 @@ globals, so you can keep machinery global and per-project choices local.
 | `cdc.s3.prefix` | Key prefix inside the bucket, e.g. `chunks/` (optional) |
 | `cdc.s3.endpoint` | Custom endpoint for MinIO/RustFS/R2 — omit for AWS |
 | `cdc.s3.force-path-style` | `true` for MinIO (path-style addressing) |
+| `cdc.ssh.remote` | `user@host` for [SSH transport](ssh.md) |
+| `cdc.ssh.path` | Chunk root directory on that host |
+| `cdc.ssh.command` | Advanced: replace the whole ssh invocation |
+
+Precedence when several are set: `cdc.s3.bucket` > `cdc.ssh.remote` >
+`cdc.url`.
 
 S3 credentials are **never** git config — they come from the standard AWS
 chain (`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` env vars, `~/.aws`
