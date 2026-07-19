@@ -55,6 +55,14 @@ fn scratch_repo() -> tempfile::TempDir {
         repo,
         &["config", "filter.cdc.smudge", &format!("{BIN} smudge")],
     );
+    git(
+        repo,
+        &[
+            "config",
+            "filter.cdc.process",
+            &format!("{BIN} filter-process"),
+        ],
+    );
     cdc(repo, &["track", "*.bin"]);
     dir
 }
@@ -214,6 +222,74 @@ fn invalid_chunk_config_fails_the_add() {
         err.contains("cdc.chunk.min"),
         "add must surface the invalid config: {err}"
     );
+}
+
+#[test]
+fn filter_process_alone_round_trips_many_files() {
+    // Only filter.cdc.process configured — no clean/smudge fallback keys —
+    // so every byte here provably moved through the pkt-line protocol, and
+    // one process serviced all files in each git operation.
+    let dir = tempfile::tempdir().unwrap();
+    let repo = dir.path();
+    git(repo, &["init", "-q"]);
+    git(repo, &["config", "user.email", "test@example.com"]);
+    git(repo, &["config", "user.name", "Test"]);
+    git(
+        repo,
+        &[
+            "config",
+            "filter.cdc.process",
+            &format!("{BIN} filter-process"),
+        ],
+    );
+    fs::write(repo.join(".gitattributes"), "*.bin filter=cdc -text\n").unwrap();
+
+    // Several files, all larger than one 64 KiB packet; one crosses chunks.
+    let files: Vec<(String, Vec<u8>)> = (0..4u64)
+        .map(|i| {
+            (
+                format!("asset{i}.bin"),
+                test_data(700 * 1024 + i as usize, 100 + i),
+            )
+        })
+        .chain([("big.bin".to_string(), test_data(3 * 1024 * 1024, 55))])
+        .collect();
+    for (name, data) in &files {
+        fs::write(repo.join(name), data).unwrap();
+    }
+    git(repo, &["add", "."]);
+    git(repo, &["commit", "-q", "-m", "assets"]);
+
+    for (name, _) in &files {
+        let blob = git(repo, &["show", &format!("HEAD:{name}")]);
+        assert!(
+            blob.starts_with("version git-cdc/spec/v1\n"),
+            "{name} not a manifest"
+        );
+        fs::remove_file(repo.join(name)).unwrap();
+    }
+    git(repo, &["checkout", "--", "."]);
+    for (name, data) in &files {
+        assert_eq!(&fs::read(repo.join(name)).unwrap(), data, "{name} restored");
+    }
+}
+
+#[test]
+fn one_shot_filters_still_work_without_process() {
+    // git < 2.11 fallback: unset filter.cdc.process, forcing the one-shot
+    // clean/smudge paths.
+    let dir = scratch_repo();
+    let repo = dir.path();
+    git(repo, &["config", "--unset", "filter.cdc.process"]);
+
+    let data = test_data(2 * 1024 * 1024, 21);
+    fs::write(repo.join("asset.bin"), &data).unwrap();
+    git(repo, &["add", ".gitattributes", "asset.bin"]);
+    git(repo, &["commit", "-q", "-m", "add asset"]);
+    assert!(git(repo, &["show", "HEAD:asset.bin"]).starts_with("version git-cdc/spec/v1\n"));
+    fs::remove_file(repo.join("asset.bin")).unwrap();
+    git(repo, &["checkout", "--", "asset.bin"]);
+    assert_eq!(fs::read(repo.join("asset.bin")).unwrap(), data);
 }
 
 #[test]

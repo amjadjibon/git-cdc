@@ -24,9 +24,13 @@ Written by `git cdc install`:
 
 ```ini
 [filter "cdc"]
+	process = git-cdc filter-process
 	clean = git-cdc clean
 	smudge = git-cdc smudge
 ```
+
+`process` keeps one filter alive per git operation (fast checkouts with
+many tracked files); `clean`/`smudge` are the fallback for git < 2.11.
 
 Safe to keep global — filters only activate for paths tracked in a repo's
 `.gitattributes`.

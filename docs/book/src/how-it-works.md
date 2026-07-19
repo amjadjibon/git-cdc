@@ -43,7 +43,10 @@ can never silently materialize wrong bytes.
 ## The filter pipeline
 
 git-cdc plugs into git's clean/smudge filter machinery, exactly like
-git-lfs:
+git-lfs — via the long-running **filter-process protocol**: git starts one
+`git-cdc filter-process` per operation and streams every tracked file
+through it over pkt-line framing, so a 500-file checkout costs one process,
+not 500 (one-shot `clean`/`smudge` remain as the git < 2.11 fallback):
 
 **clean** (runs on `git add` for tracked paths): reads file content from
 stdin, chunks it, writes each chunk into the local store, and emits the

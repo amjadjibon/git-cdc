@@ -21,38 +21,38 @@ Design per RESEARCH.md; `delay` capability deferred.
 
 ## Phase 1: pkt-line + filter refactor
 
-- [ ] **1.1** `core::pktline`: `read_packet`/`write_packet`/flush,
+- [x] **1.1** `core::pktline`: `read_packet`/`write_packet`/flush,
   `PktReader: Read` (content packets until flush), `PktWriter: Write`
   (≤65516-byte packets). Unit tests: round trip, empty payload, max-size
   payload, oversized write splits.
-- [ ] **1.2** Extract `clean_stream(reader, writer, store, params)` and
+- [x] **1.2** Extract `clean_stream(reader, writer, store, params)` and
   `smudge_stream(reader, writer, store)` from the one-shot commands; the
   commands become thin stdin/stdout wrappers. Behavior unchanged.
   *Done when*: existing e2e_filter suite passes untouched.
 
 ## Phase 2: filter-process command
 
-- [ ] **2.1** Hidden `git-cdc filter-process` subcommand: handshake,
+- [x] **2.1** Hidden `git-cdc filter-process` subcommand: handshake,
   capability negotiation (clean+smudge), per-file loop calling the shared
   streams, per-file `status=error` on failure (process survives), store +
   chunk params opened once.
-- [ ] **2.2** `install` writes `filter.cdc.process` (keeping clean/smudge).
+- [x] **2.2** `install` writes `filter.cdc.process` (keeping clean/smudge).
   *Done when*: a repo configured only with `process` round-trips
   add/checkout byte-identically.
 
 ## Phase 3: server constant-time compare
 
-- [ ] **3.1** Auth middleware compares `blake3(presented) == blake3(expected)`
+- [x] **3.1** Auth middleware compares `blake3(presented) == blake3(expected)`
   (constant-time Hash eq). Existing auth tests pass.
 
 ## Phase 4: tests + docs
 
-- [ ] **4.1** e2e (process-configured scratch repo, no clean/smudge keys):
+- [x] **4.1** e2e (process-configured scratch repo, no clean/smudge keys):
   add/checkout round trip; multi-file checkout through ONE process; file
   larger than one packet (> 64 KiB) and larger than a chunk; empty-store
   passthrough + pull materialization; corrupt-store error keeps other
   files checking out.
-- [ ] **4.2** README + book: install now uses the long-running filter;
+- [x] **4.2** README + book: install now uses the long-running filter;
   remove filter-process from out-of-scope lists (README, book development
   chapter, PONYTAIL-DEBT related-scope note).
 

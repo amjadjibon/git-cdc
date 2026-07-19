@@ -61,6 +61,14 @@ fn setup_repo(repo: &Path, endpoint: &str) {
         repo,
         &["config", "filter.cdc.smudge", &format!("{BIN} smudge")],
     );
+    git(
+        repo,
+        &[
+            "config",
+            "filter.cdc.process",
+            &format!("{BIN} filter-process"),
+        ],
+    );
     git(repo, &["config", "cdc.s3.bucket", BUCKET]);
     git(repo, &["config", "cdc.s3.prefix", "chunks/"]);
     git(repo, &["config", "cdc.s3.endpoint", endpoint]);

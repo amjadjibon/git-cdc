@@ -62,7 +62,7 @@ mdbook build docs/book    # static site in docs/book/book/
 
 ## Deliberately out of scope (so far)
 
-The git filter-process protocol (long-running filter), transfer adapters /
+Transfer adapters /
 pre-signed URL offload, SSH transport, compression, and per-branch access
 control (the batch API's `ref` field is reserved for it). Design rationale
 for all of these lives in `docs/git-cdc-mvp/DESIGN.md`.
