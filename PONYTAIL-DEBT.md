@@ -29,6 +29,6 @@ Last scan: 2026-07-19 · 0 markers. Clean ledger.
 
 Not `ponytail:` markers, but deliberate v2 deferrals recorded in
 `docs/git-cdc-mvp/DESIGN.md` and the book's Development chapter: git
-filter-process protocol, transfer adapters / pre-signed URL offload, SSH
+transfer adapters / pre-signed URL offload, SSH
 transport, compression, per-branch ACLs via the batch `ref` field,
 constant-time token comparison.

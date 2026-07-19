@@ -71,8 +71,11 @@ every hash, and rewrites the tracked files in place.
 
 ## What `git cdc install` actually does
 
-- Sets `filter.cdc.clean = git-cdc clean` and
-  `filter.cdc.smudge = git-cdc smudge` (repo-local; `--global` available).
+- Sets `filter.cdc.process = git-cdc filter-process` — one long-running
+  filter process per git operation (the gitattributes filter-process
+  protocol), instead of one process per file. `filter.cdc.clean` /
+  `filter.cdc.smudge` are also registered as the fallback for git < 2.11.
+  (Repo-local; `--global` available.)
 - Writes a pre-push hook running `git cdc push`, so chunks always reach the
   remote store before the manifests referencing them reach the git remote.
   An existing pre-push hook is never overwritten — you get a warning and

@@ -88,6 +88,14 @@ fn setup_repo(repo: &Path, server_url: &str) {
         repo,
         &["config", "filter.cdc.smudge", &format!("{BIN} smudge")],
     );
+    git(
+        repo,
+        &[
+            "config",
+            "filter.cdc.process",
+            &format!("{BIN} filter-process"),
+        ],
+    );
     git(repo, &["config", "cdc.url", server_url]);
     git(repo, &["config", "cdc.token", TOKEN]);
 }
@@ -163,6 +171,14 @@ fn sync_without_remote_config_names_both_options() {
     git(
         &repo,
         &["config", "filter.cdc.smudge", &format!("{BIN} smudge")],
+    );
+    git(
+        &repo,
+        &[
+            "config",
+            "filter.cdc.process",
+            &format!("{BIN} filter-process"),
+        ],
     );
     fs::write(repo.join("asset.bin"), test_data(1024 * 1024, 7)).unwrap();
     git(&repo, &["add", "."]);

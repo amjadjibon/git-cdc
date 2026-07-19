@@ -195,5 +195,5 @@ cargo test --workspace
 ```
 
 Design and plan documents live in [`docs/`](docs/). Out of scope so far
-(see the plans): the git filter-process protocol, transfer adapters /
+(see the plans): transfer adapters /
 pre-signed URL offload, SSH transport, and compression.

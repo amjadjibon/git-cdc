@@ -48,11 +48,13 @@ pub fn app(state: AppState) -> Router {
 
 async fn auth(State(state): State<Arc<AppState>>, req: Request, next: Next) -> Response {
     let expected = format!("Bearer {}", state.token);
+    // Compare hashes, not strings: blake3::Hash equality is constant-time,
+    // so the check leaks no prefix-length timing signal.
     let ok = req
         .headers()
         .get("authorization")
-        .and_then(|v| v.to_str().ok())
-        == Some(expected.as_str());
+        .map(|v| blake3::hash(v.as_bytes()))
+        == Some(blake3::hash(expected.as_bytes()));
     if ok {
         next.run(req).await
     } else {

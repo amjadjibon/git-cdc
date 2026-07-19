@@ -8,6 +8,7 @@
 # The filter driver — safe to keep global, it only activates for paths
 # tracked in a repo's .gitattributes (`git cdc track '*.bin'`).
 [filter "cdc"]
+	process = git-cdc filter-process
 	clean = git-cdc clean
 	smudge = git-cdc smudge
 
