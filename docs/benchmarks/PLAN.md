@@ -25,13 +25,13 @@ a baseline to argue against.
 
 ## Phase 1: bench target
 
-- [ ] **1.1** Add criterion dev-dep + `[[bench]]`; write the five groups
+- [x] **1.1** Add criterion dev-dep + `[[bench]]`; write the five groups
   with `Throughput::Bytes` where it's a bytes-per-second story.
   *Done when*: `cargo bench -p git-cdc-core` runs all groups and reports.
 
 ## Phase 2: record + document
 
-- [ ] **2.1** Run on this machine, record results in
+- [x] **2.1** Run on this machine, record results in
   `docs/benchmarks/RESULTS.md` (hardware noted); book Development chapter
   gains a Benchmarks section (`cargo bench -p git-cdc-core`).
   *Done when*: results file exists with real numbers; book builds.

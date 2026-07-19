@@ -46,6 +46,18 @@ AWS_ACCESS_KEY_ID=… AWS_SECRET_ACCESS_KEY=… \
 cargo test --workspace
 ```
 
+## Benchmarks
+
+```sh
+cargo bench -p git-cdc-core
+```
+
+Criterion benches cover the hot paths — chunker throughput, envelope
+encode/decode, manifest codec, pkt-line framing, disk store. Baselines
+and interpretation live in `docs/benchmarks/RESULTS.md`; headline: the
+chunker sustains ~760 MiB/s, everything else is faster, so real-world
+performance is network-bound.
+
 ## Coverage
 
 ```sh
