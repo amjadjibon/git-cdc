@@ -4,24 +4,19 @@
 
 use std::time::Duration;
 
-use git_cdc_core::store::s3::S3Config;
+use git_cdc_core::store::{OpendalConfig, OpendalStore};
 
 mod s3_fixture;
 
-fn test_config(bucket: &str, endpoint: String) -> S3Config {
-    S3Config {
-        bucket: bucket.into(),
-        prefix: "chunks/".into(),
-        endpoint: Some(endpoint),
-        force_path_style: true,
-    }
+fn test_config(bucket: &str, endpoint: String) -> OpendalConfig {
+    OpendalConfig::s3(bucket.into(), "chunks/".into(), Some(endpoint), true)
 }
 
 /// s3s-fs buckets are directories under the fixture root; a real endpoint
 /// (GIT_CDC_TEST_S3_ENDPOINT) must have the bucket pre-created.
-fn ensure_bucket(config: &S3Config, s3_dir: &Option<tempfile::TempDir>) {
+fn ensure_bucket(bucket: &str, s3_dir: &Option<tempfile::TempDir>) {
     if let Some(dir) = s3_dir {
-        std::fs::create_dir_all(dir.path().join(&config.bucket)).unwrap();
+        std::fs::create_dir_all(dir.path().join(bucket)).unwrap();
     }
 }
 
@@ -29,8 +24,8 @@ fn ensure_bucket(config: &S3Config, s3_dir: &Option<tempfile::TempDir>) {
 async fn s3_store_round_trip_and_gc_metadata() {
     let (endpoint, s3_dir) = s3_fixture::endpoint();
     let config = test_config("git-cdc-test-backend", endpoint);
-    ensure_bucket(&config, &s3_dir);
-    let store = config.connect().unwrap();
+    ensure_bucket("git-cdc-test-backend", &s3_dir);
+    let store = OpendalStore::connect(&config).unwrap();
 
     let data = format!("chunk-{}", std::process::id()).into_bytes();
     let hash = blake3::hash(&data);

@@ -539,18 +539,18 @@ enum Remote {
 
 fn remote() -> Result<Remote> {
     if let Ok(bucket) = git_out(&["config", "--get", "cdc.s3.bucket"]) {
-        let config = git_cdc_core::store::s3::S3Config {
+        let config = git_cdc_core::store::OpendalConfig::s3(
             bucket,
-            prefix: git_out(&["config", "--get", "cdc.s3.prefix"]).unwrap_or_default(),
-            endpoint: git_out(&["config", "--get", "cdc.s3.endpoint"]).ok(),
-            force_path_style: git_out(&["config", "--get", "cdc.s3.force-path-style"])
+            git_out(&["config", "--get", "cdc.s3.prefix"]).unwrap_or_default(),
+            git_out(&["config", "--get", "cdc.s3.endpoint"]).ok(),
+            git_out(&["config", "--get", "cdc.s3.force-path-style"])
                 .map(|v| v == "true")
                 .unwrap_or(false),
-        };
+        );
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()?;
-        let store = config.connect()?;
+        let store = git_cdc_core::store::OpendalStore::connect(&config)?;
         return Ok(Remote::S3 { store, rt });
     }
     // cdc.ssh.command (advanced/testing) overrides the ssh invocation with
