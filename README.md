@@ -67,8 +67,10 @@ git push                        # pre-push hook uploads chunks first, automatica
 
 Skip the server entirely and let the CLI talk straight to an S3-compatible
 bucket (AWS S3, MinIO, R2) — credentials come from the standard AWS
-sources (env vars, `~/.aws` config files, IMDS; SSO sessions are not
-supported), so IAM replaces the bearer token:
+sources (env vars, `~/.aws` credentials, IMDS; SSO sessions are not
+supported), so IAM replaces the bearer token. The region comes from
+`AWS_REGION`/`AWS_DEFAULT_REGION` (the profile's region is not read),
+defaulting to `us-east-1`:
 
 ```sh
 git cdc install

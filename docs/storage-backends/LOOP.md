@@ -6,9 +6,9 @@ started: 2026-07-19
 max_iterations: 3
 max_phases: 5
 max_agents: 3
-current_iteration: 1
+current_iteration: 2
 status: running
-last_review_base: 'abfd94f'
+last_review_base: 'd2ba4c2'
 ---
 
 # Dev Loop: storage-backends
@@ -18,6 +18,7 @@ last_review_base: 'abfd94f'
 | Iter | Verdict | Crit | High | Med | Low | Mode | Action |
 |------|---------|------|------|-----|-----|------|--------|
 | 1    | Approve | 0    | 0    | 0   | 2   | lite | Clean Exit |
+| 2    | Approve | 0    | 0    | 1*  | 1*  | lite | Clean Exit (findings accepted+documented) |
 
 ## Stacked PRs
 
@@ -37,3 +38,8 @@ last_review_base: 'abfd94f'
 - [x] dev-qa
 - [x] dev-code-review
 - [x] decide
+
+### Iteration 2 (user-requested: migrate s3 backend onto opendal)
+- [x] implement (S3Store deleted, S3Config maps to OpendalStore)
+- [x] review (Approve; MED-001/LOW-003 accepted + documented)
+- [x] decide (Clean Exit)

@@ -19,6 +19,14 @@
 - **`list()` stat-fallback branch** (service listing omits timestamps): not
   triggerable with `fs`; the GC contract tolerates `None` anyway.
 
+## Iteration 2 addendum (s3-on-opendal)
+
+The S3 suites (`s3_backend.rs`, `e2e_serverless.rs`) now run against
+opendal-s3; bucket creation for the in-process s3s-fs fixture is a mkdir
+under the fixture root (a real GIT_CDC_TEST_S3_ENDPOINT must have the
+bucket pre-created). The serverless e2e is the signing/credential
+regression test.
+
 ## Verdict
 
 `cargo test --workspace`: all suites green. Coverage of the new code is
