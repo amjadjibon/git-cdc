@@ -57,8 +57,12 @@ enum Cmd {
         #[arg(long, default_value_t = 24 * 3600)]
         grace_secs: u64,
     },
-    /// Diff two manifest files (added/removed chunks and bytes)
-    Diff { from: PathBuf, to: PathBuf },
+    /// Diff two manifest files (added/removed chunks and bytes); with no
+    /// arguments, diff every tracked file between HEAD and the index
+    Diff {
+        from: Option<PathBuf>,
+        to: Option<PathBuf>,
+    },
 }
 
 fn main() -> Result<()> {
@@ -75,7 +79,11 @@ fn main() -> Result<()> {
             dry_run,
             grace_secs,
         } => sync::cmd_gc(dry_run, grace_secs),
-        Cmd::Diff { from, to } => cmd_diff(&from, &to),
+        Cmd::Diff { from, to } => match (from, to) {
+            (Some(from), Some(to)) => cmd_diff(&from, &to),
+            (None, None) => cmd_diff_repo(),
+            _ => bail!("git cdc diff takes two manifest files, or none for HEAD vs index"),
+        },
     }
 }
 
@@ -147,14 +155,14 @@ fn cmd_track(patterns: &[String]) -> Result<()> {
     Ok(())
 }
 
-fn cmd_diff(from: &PathBuf, to: &PathBuf) -> Result<()> {
-    let a = Manifest::parse(&fs::read(from)?)?;
-    let b = Manifest::parse(&fs::read(to)?)?;
-    let a_set: std::collections::HashMap<_, _> =
-        a.chunks.iter().map(|c| (c.hash, c.length)).collect();
-    let b_set: std::collections::HashMap<_, _> =
-        b.chunks.iter().map(|c| (c.hash, c.length)).collect();
-
+/// (added_n, added_bytes, removed_n, removed_bytes, total chunks in `b`).
+/// `None` means "no manifest" (e.g. file absent at HEAD) — an empty side.
+fn diff_stats(a: Option<&Manifest>, b: Option<&Manifest>) -> (usize, u64, usize, u64, usize) {
+    let set = |m: Option<&Manifest>| -> std::collections::HashMap<_, _> {
+        m.map(|m| m.chunks.iter().map(|c| (c.hash, c.length)).collect())
+            .unwrap_or_default()
+    };
+    let (a_set, b_set) = (set(a), set(b));
     let added: u64 = b_set
         .iter()
         .filter(|(h, _)| !a_set.contains_key(*h))
@@ -167,13 +175,47 @@ fn cmd_diff(from: &PathBuf, to: &PathBuf) -> Result<()> {
         .sum();
     let added_n = b_set.keys().filter(|h| !a_set.contains_key(*h)).count();
     let removed_n = a_set.keys().filter(|h| !b_set.contains_key(*h)).count();
+    (added_n, added, removed_n, removed, b_set.len())
+}
+
+fn cmd_diff(from: &PathBuf, to: &PathBuf) -> Result<()> {
+    let a = Manifest::parse(&fs::read(from)?)?;
+    let b = Manifest::parse(&fs::read(to)?)?;
+    let (added_n, added, removed_n, removed, total) = diff_stats(Some(&a), Some(&b));
 
     println!(
-        "{} of {} chunks changed, +{added} B / -{removed} B",
+        "{} of {total} chunks changed, +{added} B / -{removed} B",
         added_n.max(removed_n),
-        b.chunks.len()
     );
     println!("added: {added_n} chunks (+{added} bytes)");
     println!("removed: {removed_n} chunks (-{removed} bytes)");
+    Ok(())
+}
+
+/// No-argument form: every tracked file, HEAD manifest vs index manifest.
+fn cmd_diff_repo() -> Result<()> {
+    use git_cdc_core::manifest::is_manifest;
+    let mut changed = 0usize;
+    for (path, index) in git::index_manifests()? {
+        let head = std::process::Command::new("git")
+            .args(["show", &format!("HEAD:{path}")])
+            .output()?;
+        let head = (head.status.success() && is_manifest(&head.stdout))
+            .then(|| Manifest::parse(&head.stdout))
+            .transpose()?;
+        let (added_n, added, removed_n, removed, total) =
+            diff_stats(head.as_ref(), Some(&index));
+        if added_n == 0 && removed_n == 0 {
+            continue;
+        }
+        println!(
+            "{path}: {} of {total} chunks changed, +{added} B / -{removed} B",
+            added_n.max(removed_n),
+        );
+        changed += 1;
+    }
+    if changed == 0 {
+        println!("no tracked files changed between HEAD and index");
+    }
     Ok(())
 }
