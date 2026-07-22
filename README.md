@@ -70,16 +70,27 @@ store via [OpenDAL](https://opendal.apache.org) — S3-compatible buckets
 (AWS S3, MinIO, R2), Azure Blob/Files, GCS, Dropbox, B2, SFTP/FTP, WebDAV,
 Google Drive, OneDrive, Swift. Credentials are never git config — each
 service authenticates through its own standard chain (for S3: env vars,
-`~/.aws` credentials, IMDS; SSO sessions are not supported; region comes
-from `AWS_REGION`/`AWS_DEFAULT_REGION`, defaulting to `us-east-1`):
+`~/.aws` credentials, IMDS; SSO sessions are not supported). Unlike the
+old `cdc.s3.*` flags, OpenDAL applies **no S3-specific defaults**: region
+must come from `AWS_REGION`/`AWS_DEFAULT_REGION` or an explicit `region`
+option (connecting fails loudly otherwise), and addressing defaults to
+path-style unless you set `enable_virtual_host_style=true`:
 
 ```sh
+# Real AWS S3
 git cdc install
 git config cdc.opendal.scheme s3
 git config --add cdc.opendal.option bucket=my-chunks
-git config --add cdc.opendal.option endpoint=http://127.0.0.1:9000       # MinIO/R2 only
-git config --add cdc.opendal.option enable_virtual_host_style=false     # MinIO only
+git config --add cdc.opendal.option region=us-east-1                    # or export AWS_REGION
+git config --add cdc.opendal.option enable_virtual_host_style=true       # AWS recommends this addressing mode
 git config cdc.opendal.prefix chunks/                                   # optional, default chunks/
+git cdc track '*.dat'
+
+# MinIO / R2 (path-style, custom endpoint)
+git config cdc.opendal.scheme s3
+git config --add cdc.opendal.option bucket=my-chunks
+git config --add cdc.opendal.option region=us-east-1
+git config --add cdc.opendal.option endpoint=http://127.0.0.1:9000
 git cdc track '*.dat'
 ```
 
@@ -125,9 +136,11 @@ verbatim — see the [service docs](https://docs.rs/opendal/latest/opendal/servi
 for each scheme's keys):
 
 ```sh
-# S3-compatible (AWS, MinIO, R2)
+# S3-compatible (AWS, MinIO, R2) — region is required (or set AWS_REGION),
+# even for services that ignore its value; OpenDAL has no built-in fallback
 git-cdc-server --backend opendal --opendal-scheme s3 \
   --opendal-option bucket=my-chunks \
+  --opendal-option region=us-east-1 \
   --opendal-option endpoint=http://127.0.0.1:9000 \
   --opendal-option enable_virtual_host_style=false \
   --token <secret>

@@ -11,9 +11,10 @@ applies.
 git cdc install
 git config cdc.opendal.scheme s3
 git config --add cdc.opendal.option bucket=my-chunks
-git config --add cdc.opendal.option endpoint=http://127.0.0.1:9000  # MinIO/R2 only
-git config --add cdc.opendal.option enable_virtual_host_style=false # MinIO only
-git config cdc.opendal.prefix chunks/                               # optional, default chunks/
+git config --add cdc.opendal.option region=us-east-1                 # required unless AWS_REGION is set
+git config --add cdc.opendal.option enable_virtual_host_style=true   # real AWS S3 — omit (or false) for MinIO
+git config --add cdc.opendal.option endpoint=http://127.0.0.1:9000   # MinIO/R2 only
+git config cdc.opendal.prefix chunks/                                # optional, default chunks/
 git cdc track '*.dat'
 ```
 
@@ -54,9 +55,10 @@ export AWS_ACCESS_KEY_ID=minioadmin
 export AWS_SECRET_ACCESS_KEY=minioadmin
 ```
 
-The region falls back to `us-east-1` when the chain provides none —
-S3-compatible stores ignore it, and the SDK just needs something to sign
-with. Every other OpenDAL service authenticates the same way it always
-does (its own env vars, files, or `cdc.opendal.option` entries) — see
+Unlike credentials, OpenDAL's S3 service does **not** default the region —
+set `AWS_REGION`/`AWS_DEFAULT_REGION` or an explicit `region`
+`cdc.opendal.option`; connecting fails loudly if neither is present. Every
+other OpenDAL service authenticates the same way it always does (its own
+env vars, files, or `cdc.opendal.option` entries) — see
 [OpenDAL's service docs](https://opendal.apache.org/docs/category/services/)
 for the option names each scheme accepts.

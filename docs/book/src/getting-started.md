@@ -31,8 +31,9 @@ Then in your repo:
 git cdc install                                  # filters + pre-push hook
 git config cdc.opendal.scheme s3
 git config --add cdc.opendal.option bucket=my-chunks
+git config --add cdc.opendal.option region=us-east-1                    # required unless AWS_REGION is set
+git config --add cdc.opendal.option enable_virtual_host_style=true      # real AWS S3 — omit (or set false) for MinIO
 git config --add cdc.opendal.option endpoint=http://127.0.0.1:9000       # MinIO only — omit for AWS
-git config --add cdc.opendal.option enable_virtual_host_style=false     # MinIO only
 git cdc track '*.bin' '*.dat'                    # writes .gitattributes
 
 git add . && git commit -m "add assets"

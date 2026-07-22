@@ -23,10 +23,15 @@ underlying service:
 ```sh
 git-cdc-server --backend opendal --opendal-scheme s3 \
   --opendal-option bucket=my-chunks \
+  --opendal-option region=us-east-1 \
   --opendal-option endpoint=http://127.0.0.1:9000 \
   --opendal-option enable_virtual_host_style=false \
   --token my-secret
 ```
+
+`region` is required (or set `AWS_REGION`/`AWS_DEFAULT_REGION`) even for
+S3-compatible services like MinIO that ignore its value — OpenDAL's S3
+backend has no built-in fallback.
 
 ## Flags
 
