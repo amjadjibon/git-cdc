@@ -1,6 +1,8 @@
 //! Chunk movement between local and remote stores: push, pull, gc.
 
+use std::collections::{HashMap, HashSet};
 use std::fs;
+use std::time::{Duration, SystemTime};
 
 use anyhow::{Context, Result, bail};
 use git_cdc_core::manifest::is_manifest;
@@ -9,6 +11,48 @@ use git_cdc_core::store::ChunkStore;
 
 use crate::git::{all_manifests, index_manifests, local_store, oid_str, repo_root};
 use crate::remote::{Remote, remote};
+
+/// Chunks the local store has but a remote (identified by its own listing)
+/// does not — the upload diff shared by every serverless remote kind.
+fn pending_uploads(
+    chunks: &HashMap<blake3::Hash, u64>,
+    present: &HashSet<blake3::Hash>,
+) -> Vec<blake3::Hash> {
+    chunks
+        .keys()
+        .filter(|h| !present.contains(*h))
+        .copied()
+        .collect()
+}
+
+/// What a GC sweep should do with one chunk: shared mark-and-sweep + grace
+/// rule applied by the local sweep and every serverless remote sweep alike.
+/// An unreadable/missing mtime always keeps the chunk — GC must never delete
+/// something whose age it cannot confirm.
+enum SweepAction {
+    KeepLive,
+    KeepGrace,
+    Delete,
+}
+
+fn sweep_decision(
+    is_live: bool,
+    modified: Option<SystemTime>,
+    grace: Duration,
+    now: SystemTime,
+) -> SweepAction {
+    if is_live {
+        return SweepAction::KeepLive;
+    }
+    let old_enough = modified
+        .and_then(|mtime| now.duration_since(mtime).ok())
+        .is_some_and(|age| age >= grace);
+    if old_enough {
+        SweepAction::Delete
+    } else {
+        SweepAction::KeepGrace
+    }
+}
 
 pub fn cmd_push() -> Result<()> {
     let store = local_store()?;
@@ -73,32 +117,25 @@ pub fn cmd_push() -> Result<()> {
             })?;
             pending.len()
         }
-        Remote::S3 { store: s3, rt } => rt.block_on(async {
+        Remote::Opendal { store: remote_store, rt } => rt.block_on(async {
             // One paginated listing beats a HeadObject per chunk.
-            let present: std::collections::HashSet<blake3::Hash> =
-                s3.list().await?.into_iter().map(|(h, _)| h).collect();
-            let mut uploaded = 0usize;
-            for hash in chunks.keys() {
-                if present.contains(hash) {
-                    continue;
-                }
+            let present: HashSet<blake3::Hash> =
+                remote_store.list().await?.into_iter().map(|(h, _)| h).collect();
+            let pending = pending_uploads(&chunks, &present);
+            for hash in &pending {
                 let data = store.get_encoded(hash).with_context(|| {
-                    format!("bucket needs {} but it is not in the local store — run `git cdc pull` first", oid_str(hash))
+                    format!("remote needs {} but it is not in the local store — run `git cdc pull` first", oid_str(hash))
                 })?;
-                s3.put_encoded(hash, data).await?;
-                uploaded += 1;
+                remote_store.put_encoded(hash, data).await?;
             }
-            anyhow::Ok(uploaded)
+            anyhow::Ok(pending.len())
         })?,
         Remote::Ssh(mut ssh) => {
-            // Same shape as S3: one listing, then upload the diff.
-            let present: std::collections::HashSet<blake3::Hash> =
+            // Same shape as the opendal remote: one listing, then upload the diff.
+            let present: HashSet<blake3::Hash> =
                 ssh.list()?.into_iter().map(|(h, _)| h).collect();
-            let mut uploaded = 0usize;
-            for hash in chunks.keys() {
-                if present.contains(hash) {
-                    continue;
-                }
+            let pending = pending_uploads(&chunks, &present);
+            for hash in &pending {
                 let data = store.get_encoded(hash).with_context(|| {
                     format!(
                         "ssh remote needs {} but it is not in the local store — run `git cdc pull` first",
@@ -106,9 +143,8 @@ pub fn cmd_push() -> Result<()> {
                     )
                 })?;
                 ssh.put_encoded(hash, &data)?;
-                uploaded += 1;
             }
-            uploaded
+            pending.len()
         }
     };
     eprintln!(
@@ -167,9 +203,12 @@ pub fn cmd_pull() -> Result<()> {
                     store.put_encoded(&hash, &data)?; // decodes envelope, verifies hash
                 }
             }
-            Remote::S3 { store: s3, rt } => rt.block_on(async {
+            Remote::Opendal {
+                store: remote_store,
+                rt,
+            } => rt.block_on(async {
                 for hash in missing.keys() {
-                    let data = s3.get_encoded(hash).await?;
+                    let data = remote_store.get_encoded(hash).await?;
                     store.put_encoded(hash, &data)?; // decodes envelope, verifies hash
                 }
                 anyhow::Ok(())
@@ -218,18 +257,16 @@ pub fn cmd_gc(dry_run: bool, grace_secs: u64) -> Result<()> {
         .collect();
 
     // Local sweep: same mark-and-sweep + grace rule the server applies.
-    let now = std::time::SystemTime::now();
+    let now = SystemTime::now();
     let mut swept = 0usize;
     for hash in store.list()? {
-        if live.contains(&hash) {
-            continue;
-        }
-        let old_enough = fs::metadata(store.path_for(&hash))
+        let modified = fs::metadata(store.path_for(&hash))
             .and_then(|md| md.modified())
-            .ok()
-            .and_then(|mtime| now.duration_since(mtime).ok())
-            .is_some_and(|age| age >= grace);
-        if !old_enough {
+            .ok();
+        if !matches!(
+            sweep_decision(live.contains(&hash), modified, grace, now),
+            SweepAction::Delete
+        ) {
             continue;
         }
         if dry_run {
@@ -258,53 +295,46 @@ pub fn cmd_gc(dry_run: bool, grace_secs: u64) -> Result<()> {
                 resp.kept_grace
             );
         }
-        Ok(Remote::S3 { store: s3, rt }) => {
+        Ok(Remote::Opendal {
+            store: remote_store,
+            rt,
+        }) => {
             // Serverless: no server to own the sweep — the CLI's grace applies.
             let (deleted, kept_live, kept_grace) = rt.block_on(async {
                 let (mut deleted, mut kept_live, mut kept_grace) = (0usize, 0usize, 0usize);
-                for (hash, modified) in s3.list().await? {
-                    if live.contains(&hash) {
-                        kept_live += 1;
-                        continue;
+                for (hash, modified) in remote_store.list().await? {
+                    match sweep_decision(live.contains(&hash), modified, grace, now) {
+                        SweepAction::KeepLive => kept_live += 1,
+                        SweepAction::KeepGrace => kept_grace += 1,
+                        SweepAction::Delete => {
+                            if !dry_run {
+                                remote_store.remove(&hash).await?;
+                            }
+                            deleted += 1;
+                        }
                     }
-                    let old_enough = modified
-                        .and_then(|mtime| now.duration_since(mtime).ok())
-                        .is_some_and(|age| age >= grace);
-                    if !old_enough {
-                        kept_grace += 1;
-                        continue;
-                    }
-                    if !dry_run {
-                        s3.remove(&hash).await?;
-                    }
-                    deleted += 1;
                 }
                 anyhow::Ok((deleted, kept_live, kept_grace))
             })?;
             eprintln!(
-                "git-cdc: bucket gc {} {deleted} chunks ({kept_live} live, {kept_grace} in grace period)",
+                "git-cdc: remote gc {} {deleted} chunks ({kept_live} live, {kept_grace} in grace period)",
                 if dry_run { "would remove" } else { "removed" },
             );
         }
         Ok(Remote::Ssh(mut ssh)) => {
-            // Like S3: no server owns the sweep — CLI grace + remote mtimes.
+            // Like the opendal remote: no server owns the sweep — CLI grace + remote mtimes.
             let (mut deleted, mut kept_live, mut kept_grace) = (0usize, 0usize, 0usize);
             for (hash, modified) in ssh.list()? {
-                if live.contains(&hash) {
-                    kept_live += 1;
-                    continue;
+                match sweep_decision(live.contains(&hash), modified, grace, now) {
+                    SweepAction::KeepLive => kept_live += 1,
+                    SweepAction::KeepGrace => kept_grace += 1,
+                    SweepAction::Delete => {
+                        if !dry_run {
+                            ssh.remove(&hash)?;
+                        }
+                        deleted += 1;
+                    }
                 }
-                let old_enough = modified
-                    .and_then(|mtime| now.duration_since(mtime).ok())
-                    .is_some_and(|age| age >= grace);
-                if !old_enough {
-                    kept_grace += 1;
-                    continue;
-                }
-                if !dry_run {
-                    ssh.remove(&hash)?;
-                }
-                deleted += 1;
             }
             eprintln!(
                 "git-cdc: ssh gc {} {deleted} chunks ({kept_live} live, {kept_grace} in grace period)",

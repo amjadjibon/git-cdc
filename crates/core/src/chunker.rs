@@ -103,12 +103,11 @@ pub fn chunk_stream<R: Read>(
     Ok((chunks, file_hasher.finalize(), size))
 }
 
-#[cfg(test)]
-pub(crate) mod tests {
-    use super::*;
-
-    // Deterministic pseudo-random bytes without a rand dependency.
-    pub(crate) fn test_data(len: usize, seed: u64) -> Vec<u8> {
+/// Test/bench helpers. Compiled unconditionally (not cfg(test)) so other
+/// crates' test binaries and benches can share them.
+pub mod test_util {
+    /// Deterministic pseudo-random bytes without a rand dependency.
+    pub fn test_data(len: usize, seed: u64) -> Vec<u8> {
         let mut state = seed | 1;
         (0..len)
             .map(|_| {
@@ -119,6 +118,12 @@ pub(crate) mod tests {
             })
             .collect()
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::test_util::test_data;
+    use super::*;
 
     fn chunk_all(data: &[u8]) -> (Vec<Chunk>, blake3::Hash, u64) {
         chunk_stream(data, ChunkParams::default(), |_, _| Ok(())).unwrap()

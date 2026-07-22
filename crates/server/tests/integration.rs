@@ -4,6 +4,10 @@ use git_cdc_core::protocol::*;
 use git_cdc_core::store::DiskStore;
 use git_cdc_server::{AppState, Backend, app};
 
+mod support;
+
+use support::client;
+
 async fn spawn_server(grace: Duration) -> (String, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
     let state = AppState {
@@ -18,15 +22,6 @@ async fn spawn_server(grace: Duration) -> (String, tempfile::TempDir) {
         axum::serve(listener, app(state)).await.unwrap();
     });
     (base, dir)
-}
-
-fn client() -> reqwest::Client {
-    let mut headers = reqwest::header::HeaderMap::new();
-    headers.insert("authorization", "Bearer test-token".parse().unwrap());
-    reqwest::Client::builder()
-        .default_headers(headers)
-        .build()
-        .unwrap()
 }
 
 fn oid(data: &[u8]) -> String {

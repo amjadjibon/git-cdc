@@ -40,7 +40,17 @@ Pure refactor — behavior must not change.
 **Goal**: delete all five confirmed duplications, safest/most mechanical first, riskiest
 (`sync.rs`) last.
 
-- [ ] TASK-001: Deduplicate the S3 test fixture. Move
+> **Mid-flight scope change**: partway through TASK-001 the user separately directed
+> removing the dedicated S3 backend/remote entirely (server's `--backend s3`, CLI's
+> `Remote::S3` + `cdc.s3.*` config) in favor of the already-generic OpenDAL path, since
+> S3 is just one OpenDAL scheme among many already supported. That superseded the
+> shared `test-support/s3_fixture.rs` this task had just created — both fixture copies,
+> `crates/server/tests/s3_backend.rs`, and `OpendalConfig::s3` are now deleted rather
+> than deduplicated, and `e2e_serverless.rs` was rewritten to exercise the generic
+> `cdc.opendal.*` remote against the `fs` scheme instead of a fake S3 server. TASK-005's
+> `Remote::S3` branches became `Remote::Opendal` accordingly.
+
+- [x] TASK-001: Deduplicate the S3 test fixture. Move
   `crates/cli/tests/s3_fixture/mod.rs` to a new workspace-level file
   `test-support/s3_fixture.rs` (plain file, not a crate — no `Cargo.toml`). Delete
   `crates/server/tests/s3_fixture/mod.rs`. In `crates/cli/tests/e2e_serverless.rs` and
@@ -51,7 +61,7 @@ Pure refactor — behavior must not change.
   `cargo test -p git-cdc-server --test s3_backend`). Remove the now-empty
   `crates/cli/tests/s3_fixture/` and `crates/server/tests/s3_fixture/` directories.
 
-- [ ] TASK-002: Deduplicate the `test_data` PRNG helper. In
+- [x] TASK-002: Deduplicate the `test_data` PRNG helper. In
   `crates/core/src/chunker.rs`, add an unconditionally-compiled `pub mod test_util { pub
   fn test_data(len: usize, seed: u64) -> Vec<u8> { ... } }` (same 11-line xorshift body
   currently at chunker.rs:111-121, `#[cfg(test)] pub(crate) mod tests`) — not
@@ -68,7 +78,7 @@ Pure refactor — behavior must not change.
   path/visibility if `chunker` is private, e.g. re-export via
   `pub use chunker::test_util` from `lib.rs`).
 
-- [ ] TASK-003: Deduplicate the e2e test harness. Create
+- [x] TASK-003: Deduplicate the e2e test harness. Create
   `crates/cli/tests/support/mod.rs` with shared `git()`, `cdc()`, and
   `base_setup_repo()` extracted from the near-identical definitions in
   `crates/cli/tests/e2e_full.rs:39-101`, `e2e_serverless.rs:16-76`, `e2e_ssh.rs:14-77`,
@@ -80,14 +90,14 @@ Pure refactor — behavior must not change.
   its own 2-3 lines of remote-specific config (http token / s3 config / ssh command) on
   top of `support::base_setup_repo()`. Delete the four duplicated definitions.
 
-- [ ] TASK-004: Deduplicate the server test auth-client builder. Create
+- [x] TASK-004: Deduplicate the server test auth-client builder. Create
   `crates/server/tests/support.rs` (or extend one if TASK-003's pattern suggests a
   shared name) exporting a `client()` function building the bearer-auth
   `reqwest::Client` currently duplicated at `crates/server/tests/integration.rs:23-30`
   and inline at `opendal_backend.rs:96-101`. Both files add `mod support;` (or
   `#[path]`) and call `support::client()`, deleting their own copies.
 
-- [ ] TASK-005: Deduplicate `sync.rs`'s S3/SSH branches. Read
+- [x] TASK-005: Deduplicate `sync.rs`'s S3/SSH branches. Read
   `crates/cli/src/sync.rs` in full first. In `cmd_push` (S3 branch: lines ~76-92, SSH
   branch: ~93-112), extract a pure function, e.g. `fn pending_uploads(chunks:
   &HashMap<blake3::Hash, u64>, present: &HashSet<blake3::Hash>) -> Vec<blake3::Hash>`

@@ -7,10 +7,14 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
+use git_cdc_core::chunker::test_util::test_data;
 use git_cdc_core::store::DiskStore;
 use git_cdc_server::{AppState, Backend, app};
 
-const BIN: &str = env!("CARGO_BIN_EXE_git-cdc");
+mod support;
+
+use support::{BIN, cdc, git, git_cmd};
+
 const TOKEN: &str = "e2e-token";
 
 fn spawn_server(root: PathBuf, grace: Duration) -> String {
@@ -36,80 +40,10 @@ fn spawn_server(root: PathBuf, grace: Duration) -> String {
     rx.recv().unwrap()
 }
 
-fn git(repo: &Path, args: &[&str]) -> String {
-    let out = git_cmd(repo, args);
-    assert!(
-        out.status.success(),
-        "git {args:?} failed: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    String::from_utf8_lossy(&out.stdout).into_owned()
-}
-
-fn git_cmd(repo: &Path, args: &[&str]) -> std::process::Output {
-    // Hooks invoke `git cdc push` via $PATH — put our freshly built binary first.
-    let bin_dir = Path::new(BIN).parent().unwrap();
-    let path = format!("{}:{}", bin_dir.display(), std::env::var("PATH").unwrap());
-    Command::new("git")
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_SYSTEM", "/dev/null")
-        .args(args)
-        .current_dir(repo)
-        .env("PATH", path)
-        .output()
-        .unwrap()
-}
-
-fn cdc(repo: &Path, args: &[&str]) -> String {
-    let out = Command::new(BIN)
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_SYSTEM", "/dev/null")
-        .args(args)
-        .current_dir(repo)
-        .output()
-        .unwrap();
-    assert!(
-        out.status.success(),
-        "git-cdc {args:?} failed: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    String::from_utf8_lossy(&out.stderr).into_owned()
-}
-
 fn setup_repo(repo: &Path, server_url: &str) {
-    git(repo, &["config", "user.email", "test@example.com"]);
-    git(repo, &["config", "user.name", "Test"]);
-    cdc(repo, &["install"]);
-    git(
-        repo,
-        &["config", "filter.cdc.clean", &format!("{BIN} clean")],
-    );
-    git(
-        repo,
-        &["config", "filter.cdc.smudge", &format!("{BIN} smudge")],
-    );
-    git(
-        repo,
-        &[
-            "config",
-            "filter.cdc.process",
-            &format!("{BIN} filter-process"),
-        ],
-    );
+    support::base_setup_repo(repo);
     git(repo, &["config", "cdc.url", server_url]);
     git(repo, &["config", "cdc.token", TOKEN]);
-}
-
-fn test_data(len: usize, seed: u64) -> Vec<u8> {
-    let mut state = seed | 1;
-    (0..len)
-        .map(|_| {
-            state ^= state << 13;
-            state ^= state >> 7;
-            state ^= state << 17;
-            state as u8
-        })
-        .collect()
 }
 
 fn server_chunk_count(server_root: &Path) -> usize {
@@ -194,7 +128,7 @@ fn sync_without_remote_config_names_both_options() {
     assert!(!out.status.success());
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(
-        err.contains("cdc.url") && err.contains("cdc.s3.bucket"),
+        err.contains("cdc.url") && err.contains("cdc.opendal.scheme"),
         "error must name both remote options: {err}"
     );
 }
