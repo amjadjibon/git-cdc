@@ -9,7 +9,8 @@ use git_cdc_server::{AppState, Backend, app};
 enum BackendKind {
     Disk,
     S3,
-    /// Any OpenDAL service: azblob, gcs, sftp, ftp, gdrive, webdav, onedrive
+    /// Any OpenDAL service: azblob, azfile, b2, dropbox, gcs, sftp, ftp,
+    /// gdrive, swift, webdav, onedrive
     Opendal,
 }
 
@@ -44,8 +45,8 @@ struct Args {
     /// Path-style addressing (required by MinIO)
     #[arg(long)]
     s3_force_path_style: bool,
-    /// OpenDAL service scheme (opendal backend), e.g. azblob, gcs, sftp,
-    /// ftp, gdrive, webdav, onedrive
+    /// OpenDAL service scheme (opendal backend), e.g. azblob, azfile, b2,
+    /// dropbox, gcs, sftp, ftp, gdrive, swift, webdav, onedrive
     #[arg(
         long,
         env = "GIT_CDC_OPENDAL_SCHEME",
