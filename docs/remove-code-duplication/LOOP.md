@@ -8,8 +8,8 @@ max_iterations: 2
 max_phases: 1
 max_agents: 2
 current_iteration: 1
-status: running
-last_review_base: ''
+status: awaiting-approval
+last_review_base: 'main'
 ---
 
 # Dev Loop: remove-code-duplication
@@ -18,7 +18,7 @@ last_review_base: ''
 
 | Iter | Phase | Verdict | Crit | High | Med | Low | Mode | Action |
 |------|-------|---------|------|------|-----|-----|------|--------|
-| 1    | 1     | —       | —    | —    | —   | —   | —    | —      |
+| 1    | 1     | Approve | 0    | 0    | 0   | 0   | lite | Clean exit |
 
 <!-- lite: Phase is always 1. -->
 
@@ -38,5 +38,5 @@ last_review_base: ''
 ### Iteration 1
 - [x] dev-implement-plan
 - [x] dev-qa
-- [ ] dev-code-review
-- [ ] decide
+- [x] dev-code-review
+- [x] decide — Approve, clean exit, awaiting user approval to push + PR
