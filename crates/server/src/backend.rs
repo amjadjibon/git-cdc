@@ -8,8 +8,7 @@ use git_cdc_core::store::{ChunkStore, DiskStore, OpendalStore};
 pub enum Backend {
     Disk(DiskStore),
     /// Everything remote: s3, azblob, azfile, b2, dropbox, gcs, sftp, ftp,
-    /// gdrive, swift, webdav, onedrive (the s3 flags map onto this via
-    /// `OpendalConfig::s3`).
+    /// gdrive, swift, webdav, onedrive.
     Opendal(OpendalStore),
 }
 

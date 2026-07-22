@@ -9,6 +9,8 @@ use git_cdc_core::store::envelope;
 use git_cdc_core::store::opendal::{OpendalConfig, OpendalStore};
 use git_cdc_server::{AppState, Backend, app};
 
+mod support;
+
 fn fs_store(root: &std::path::Path) -> OpendalStore {
     OpendalStore::connect(&OpendalConfig {
         scheme: "fs".into(),
@@ -93,12 +95,7 @@ async fn server_round_trip_and_gc_over_opendal() {
         axum::serve(listener, app(state)).await.unwrap();
     });
 
-    let mut headers = reqwest::header::HeaderMap::new();
-    headers.insert("authorization", "Bearer test-token".parse().unwrap());
-    let c = reqwest::Client::builder()
-        .default_headers(headers)
-        .build()
-        .unwrap();
+    let c = support::client();
 
     let data = b"opendal e2e chunk".to_vec();
     let oid = format!("blake3:{}", blake3::hash(&data).to_hex());

@@ -8,9 +8,8 @@ use git_cdc_server::{AppState, Backend, app};
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
 enum BackendKind {
     Disk,
-    S3,
-    /// Any OpenDAL service: azblob, azfile, b2, dropbox, gcs, sftp, ftp,
-    /// gdrive, swift, webdav, onedrive
+    /// Any OpenDAL service: s3, azblob, azfile, b2, dropbox, gcs, sftp,
+    /// ftp, gdrive, swift, webdav, onedrive
     Opendal,
 }
 
@@ -33,20 +32,8 @@ struct Args {
     /// Chunk store root directory (disk backend)
     #[arg(long, env = "GIT_CDC_ROOT", required_if_eq("backend", "disk"))]
     root: Option<std::path::PathBuf>,
-    /// S3 bucket (s3 backend)
-    #[arg(long, env = "GIT_CDC_S3_BUCKET", required_if_eq("backend", "s3"))]
-    s3_bucket: Option<String>,
-    /// Key prefix inside the bucket, e.g. "chunks/"
-    #[arg(long, default_value = "")]
-    s3_prefix: String,
-    /// Custom endpoint for MinIO/R2, e.g. http://127.0.0.1:9000
-    #[arg(long, env = "GIT_CDC_S3_ENDPOINT")]
-    s3_endpoint: Option<String>,
-    /// Path-style addressing (required by MinIO)
-    #[arg(long)]
-    s3_force_path_style: bool,
-    /// OpenDAL service scheme (opendal backend), e.g. azblob, azfile, b2,
-    /// dropbox, gcs, sftp, ftp, gdrive, swift, webdav, onedrive
+    /// OpenDAL service scheme (opendal backend), e.g. s3, azblob, azfile,
+    /// b2, dropbox, gcs, sftp, ftp, gdrive, swift, webdav, onedrive
     #[arg(
         long,
         env = "GIT_CDC_OPENDAL_SCHEME",
@@ -81,17 +68,6 @@ async fn main() -> anyhow::Result<()> {
             };
             Backend::Disk(DiskStore::new(root))
         }
-        BackendKind::S3 => {
-            let Some(bucket) = args.s3_bucket else {
-                bail!("--s3-bucket is required for the s3 backend")
-            };
-            Backend::Opendal(OpendalStore::connect(&OpendalConfig::s3(
-                bucket,
-                args.s3_prefix,
-                args.s3_endpoint,
-                args.s3_force_path_style,
-            ))?)
-        }
         BackendKind::Opendal => {
             let Some(scheme) = args.opendal_scheme else {
                 bail!("--opendal-scheme is required for the opendal backend")
@@ -120,16 +96,6 @@ mod tests {
     use super::*;
 
     // PLAN 1.3 done-when: backend/flag pairing is enforced at startup.
-    #[test]
-    fn s3_backend_requires_bucket() {
-        let r = Args::try_parse_from(["s", "--backend", "s3", "--token", "t"]);
-        assert!(r.is_err());
-        assert!(
-            Args::try_parse_from(["s", "--backend", "s3", "--s3-bucket", "b", "--token", "t"])
-                .is_ok()
-        );
-    }
-
     #[test]
     fn disk_backend_requires_root() {
         assert!(Args::try_parse_from(["s", "--backend", "disk", "--token", "t"]).is_err());

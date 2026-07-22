@@ -21,37 +21,6 @@ pub struct OpendalStore {
     prefix: String,
 }
 
-impl OpendalConfig {
-    /// The S3 flag surface (`--s3-*` / `cdc.s3.*`) mapped onto the `s3`
-    /// scheme. Credentials come from the standard AWS env vars, `~/.aws`
-    /// credentials, or IMDS (OpenDAL loads them); region falls back to
-    /// us-east-1 — S3-compatible stores ignore it, and AWS requires
-    /// *something* to sign with. Addressing matches the old aws-sdk
-    /// behavior: virtual-host unless `force_path_style` (MinIO).
-    pub fn s3(
-        bucket: String,
-        prefix: String,
-        endpoint: Option<String>,
-        force_path_style: bool,
-    ) -> OpendalConfig {
-        let mut options = vec![("bucket".to_string(), bucket)];
-        if let Some(endpoint) = endpoint {
-            options.push(("endpoint".into(), endpoint));
-        }
-        if !force_path_style {
-            options.push(("enable_virtual_host_style".into(), "true".into()));
-        }
-        if std::env::var("AWS_REGION").is_err() && std::env::var("AWS_DEFAULT_REGION").is_err() {
-            options.push(("region".into(), "us-east-1".into()));
-        }
-        OpendalConfig {
-            scheme: "s3".into(),
-            options,
-            prefix,
-        }
-    }
-}
-
 impl OpendalStore {
     pub fn connect(config: &OpendalConfig) -> Result<OpendalStore> {
         opendal::init_default_registry();

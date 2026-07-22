@@ -9,20 +9,19 @@ globals, so you can keep machinery global and per-project choices local.
 | --- | ------- |
 | `cdc.url` | git-cdc-server base URL (server mode) |
 | `cdc.token` | Bearer token for that server |
-| `cdc.s3.bucket` | S3 bucket (serverless mode) — **its presence selects S3 mode over `cdc.url`** |
-| `cdc.s3.prefix` | Key prefix inside the bucket, e.g. `chunks/` (optional) |
-| `cdc.s3.endpoint` | Custom endpoint for MinIO/RustFS/R2 — omit for AWS |
-| `cdc.s3.force-path-style` | `true` for MinIO (path-style addressing) |
+| `cdc.opendal.scheme` | Any OpenDAL service (`s3`, `azblob`, `gcs`, `dropbox`, ...) — **its presence selects serverless mode over `cdc.url`** |
+| `cdc.opendal.option` | Service option as `KEY=VALUE`, repeatable (`git config --add`), e.g. `bucket=my-chunks` |
+| `cdc.opendal.prefix` | Key prefix inside the service, e.g. `chunks/` (default) |
 | `cdc.ssh.remote` | `user@host` for [SSH transport](ssh.md) |
 | `cdc.ssh.path` | Chunk root directory on that host |
 | `cdc.ssh.command` | Advanced: replace the whole ssh invocation |
 
-Precedence when several are set: `cdc.s3.bucket` > `cdc.ssh.remote` >
+Precedence when several are set: `cdc.opendal.scheme` > `cdc.ssh.remote` >
 `cdc.url`.
 
-S3 credentials are **never** git config — they come from the standard AWS
-chain (`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` env vars, `~/.aws`
-profiles, or instance metadata).
+Service credentials are **never** git config — they come from each
+service's standard chain (e.g. for S3: `AWS_ACCESS_KEY_ID`/
+`AWS_SECRET_ACCESS_KEY` env vars, `~/.aws` profiles, or instance metadata).
 
 ## Filter registration
 

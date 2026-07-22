@@ -19,8 +19,9 @@ All commands run as `git cdc <command>` (git finds the `git-cdc` binary on
   have (e.g. a clone that never pulled) — the error says to run
   `git cdc pull` first. Combined with the pre-push hook, this guarantees a
   git remote never references chunks the chunk store lacks.
-- `push`/`pull`/`gc` with no remote configured name both options in the
-  error: `cdc.url` (server) or `cdc.s3.bucket` (serverless).
+- `push`/`pull`/`gc` with no remote configured name every option in the
+  error: `cdc.url` (server), `cdc.opendal.scheme` (serverless), or
+  `cdc.ssh.remote` (ssh).
 - `clean` fails hard on invalid `cdc.chunk.*` config, naming the key.
 - `smudge` with missing chunks emits manifest text and succeeds (safe
   degradation); on corrupt data it fails loudly instead of emitting bytes.

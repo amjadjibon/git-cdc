@@ -63,26 +63,31 @@ git add model.dat && git commit -m "add model"
 git push                        # pre-push hook uploads chunks first, automatically
 ```
 
-### Serverless mode (S3, no server)
+### Serverless mode (any OpenDAL service, no server)
 
-Skip the server entirely and let the CLI talk straight to an S3-compatible
-bucket (AWS S3, MinIO, R2) — credentials come from the standard AWS
-sources (env vars, `~/.aws` credentials, IMDS; SSO sessions are not
-supported), so IAM replaces the bearer token. The region comes from
-`AWS_REGION`/`AWS_DEFAULT_REGION` (the profile's region is not read),
-defaulting to `us-east-1`:
+Skip the server entirely and let the CLI talk straight to a remote object
+store via [OpenDAL](https://opendal.apache.org) — S3-compatible buckets
+(AWS S3, MinIO, R2), Azure Blob/Files, GCS, Dropbox, B2, SFTP/FTP, WebDAV,
+Google Drive, OneDrive, Swift. Credentials are never git config — each
+service authenticates through its own standard chain (for S3: env vars,
+`~/.aws` credentials, IMDS; SSO sessions are not supported; region comes
+from `AWS_REGION`/`AWS_DEFAULT_REGION`, defaulting to `us-east-1`):
 
 ```sh
 git cdc install
-git config cdc.s3.bucket my-chunks
-git config cdc.s3.prefix chunks/                       # optional
-git config cdc.s3.endpoint http://127.0.0.1:9000       # MinIO/R2 only
-git config cdc.s3.force-path-style true                # MinIO only
+git config cdc.opendal.scheme s3
+git config --add cdc.opendal.option bucket=my-chunks
+git config --add cdc.opendal.option endpoint=http://127.0.0.1:9000       # MinIO/R2 only
+git config --add cdc.opendal.option enable_virtual_host_style=false     # MinIO only
+git config cdc.opendal.prefix chunks/                                   # optional, default chunks/
 git cdc track '*.dat'
 ```
 
-`push`/`pull`/`gc` then negotiate against the bucket directly (one listing
-instead of a batch call). If `cdc.s3.bucket` is set it wins over `cdc.url`.
+`cdc.opendal.option` may be repeated (`git config --add`), one `KEY=VALUE`
+pair per service option — passed to OpenDAL verbatim, same convention as
+the server's `--opendal-option` flag. `push`/`pull`/`gc` then negotiate
+against the service directly (one listing instead of a batch call). If
+`cdc.opendal.scheme` is set it wins over `cdc.url`.
 
 ### SSH transport (no server, no bucket)
 
@@ -98,7 +103,7 @@ git cdc track '*.dat'
 
 The CLI runs `ssh user@host git-cdc stdio --root /srv/cdc-chunks` and
 speaks a pkt-line protocol over the pipe; your ssh config (keys, agents,
-jump hosts) applies as-is. Precedence: `cdc.s3.bucket` >
+jump hosts) applies as-is. Precedence: `cdc.opendal.scheme` >
 `cdc.ssh.remote` > `cdc.url`.
 
 ### Compression
@@ -109,26 +114,24 @@ and kept raw. Identity stays the uncompressed BLAKE3, so manifests, dedup,
 and existing stores are unaffected (pre-compression stores keep working).
 Format: [docs/spec/chunk-storage.md](docs/spec/chunk-storage.md).
 
-### Server with S3 storage
+### Server with S3, Azure, GCS, SFTP, FTP, Google Drive, WebDAV, OneDrive
 
-The server itself can also store chunks in a bucket instead of local disk —
-central token auth stays, S3 holds the bytes:
-
-```sh
-git-cdc-server --backend s3 --s3-bucket my-chunks \
-  --s3-endpoint http://127.0.0.1:9000 --s3-force-path-style \
-  --token <secret>
-```
-
-### Server with Azure, GCS, SFTP, FTP, Google Drive, WebDAV, OneDrive
-
-The `opendal` backend routes chunk storage through
+The server itself can also store chunks in a remote service instead of
+local disk — central token auth stays, the service holds the bytes. The
+`opendal` backend routes chunk storage through
 [Apache OpenDAL](https://opendal.apache.org/): pick a scheme and pass its
 options as repeatable `--opendal-option KEY=VALUE` flags (passed to OpenDAL
 verbatim — see the [service docs](https://docs.rs/opendal/latest/opendal/services/)
 for each scheme's keys):
 
 ```sh
+# S3-compatible (AWS, MinIO, R2)
+git-cdc-server --backend opendal --opendal-scheme s3 \
+  --opendal-option bucket=my-chunks \
+  --opendal-option endpoint=http://127.0.0.1:9000 \
+  --opendal-option enable_virtual_host_style=false \
+  --token <secret>
+
 # Azure Blob
 git-cdc-server --backend opendal --opendal-scheme azblob \
   --opendal-option container=my-chunks \

@@ -29,9 +29,10 @@ Then in your repo:
 
 ```sh
 git cdc install                                  # filters + pre-push hook
-git config cdc.s3.bucket my-chunks
-git config cdc.s3.endpoint http://127.0.0.1:9000 # MinIO only — omit for AWS
-git config cdc.s3.force-path-style true         # MinIO only
+git config cdc.opendal.scheme s3
+git config --add cdc.opendal.option bucket=my-chunks
+git config --add cdc.opendal.option endpoint=http://127.0.0.1:9000       # MinIO only — omit for AWS
+git config --add cdc.opendal.option enable_virtual_host_style=false     # MinIO only
 git cdc track '*.bin' '*.dat'                    # writes .gitattributes
 
 git add . && git commit -m "add assets"
@@ -61,7 +62,7 @@ what to do:
 ```sh
 git clone <repo> && cd <repo>
 git cdc install          # per-clone: filters are repo-local
-git config cdc.url http://your-server:8077    # or the cdc.s3.* trio
+git config cdc.url http://your-server:8077    # or cdc.opendal.scheme + cdc.opendal.option
 git config cdc.token <secret>
 git cdc pull             # fetch chunks, materialize tracked files
 ```

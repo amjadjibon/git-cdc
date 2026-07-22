@@ -1,5 +1,5 @@
-//! Remote chunk stores (HTTP server, S3, ssh) and the stdio protocol
-//! that backs the ssh transport.
+//! Remote chunk stores (HTTP server, any OpenDAL service, ssh) and the
+//! stdio protocol that backs the ssh transport.
 
 use std::fs;
 use std::io::{Read, Write};
@@ -182,32 +182,46 @@ impl Drop for SshRemote {
     }
 }
 
-/// Where chunks live remotely: a git-cdc-server (batch API), an S3 bucket
-/// (IAM credentials), or a host reachable over ssh with git-cdc installed.
+/// Where chunks live remotely: a git-cdc-server (batch API), any OpenDAL
+/// service directly (s3, azblob, gcs, ... — IAM/service credentials), or a
+/// host reachable over ssh with git-cdc installed.
 pub enum Remote {
     Http(git_cdc_core::client::Client),
-    S3 {
+    Opendal {
         store: git_cdc_core::store::OpendalStore,
         rt: tokio::runtime::Runtime,
     },
     Ssh(SshRemote),
 }
 
+/// `cdc.opendal.option` may be set multiple times (`git config --add`),
+/// one `KEY=VALUE` pair each — the same convention as the server's
+/// repeatable `--opendal-option` flag.
+fn opendal_options() -> Result<Vec<(String, String)>> {
+    git_out(&["config", "--get-all", "cdc.opendal.option"])
+        .unwrap_or_default()
+        .lines()
+        .map(|line| {
+            line.split_once('=')
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .with_context(|| format!("cdc.opendal.option {line:?} is not KEY=VALUE"))
+        })
+        .collect()
+}
+
 pub fn remote() -> Result<Remote> {
-    if let Ok(bucket) = git_out(&["config", "--get", "cdc.s3.bucket"]) {
-        let config = git_cdc_core::store::OpendalConfig::s3(
-            bucket,
-            git_out(&["config", "--get", "cdc.s3.prefix"]).unwrap_or_default(),
-            git_out(&["config", "--get", "cdc.s3.endpoint"]).ok(),
-            git_out(&["config", "--get", "cdc.s3.force-path-style"])
-                .map(|v| v == "true")
-                .unwrap_or(false),
-        );
+    if let Ok(scheme) = git_out(&["config", "--get", "cdc.opendal.scheme"]) {
+        let config = git_cdc_core::store::OpendalConfig {
+            scheme,
+            options: opendal_options()?,
+            prefix: git_out(&["config", "--get", "cdc.opendal.prefix"])
+                .unwrap_or_else(|_| "chunks/".into()),
+        };
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()?;
         let store = git_cdc_core::store::OpendalStore::connect(&config)?;
-        return Ok(Remote::S3 { store, rt });
+        return Ok(Remote::Opendal { store, rt });
     }
     // cdc.ssh.command (advanced/testing) overrides the ssh invocation with
     // an arbitrary argv, whitespace-split.
@@ -229,7 +243,8 @@ pub fn remote() -> Result<Remote> {
     }
     let url = git_out(&["config", "--get", "cdc.url"]).context(
         "no remote configured; set cdc.url + cdc.token (server), \
-         cdc.s3.bucket (serverless S3), or cdc.ssh.remote + cdc.ssh.path (ssh)",
+         cdc.opendal.scheme (serverless — s3, azblob, gcs, ...), \
+         or cdc.ssh.remote + cdc.ssh.path (ssh)",
     )?;
     let token = git_out(&["config", "--get", "cdc.token"])
         .context("cdc.token is not configured; set it with `git config cdc.token <token>`")?;
