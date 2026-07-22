@@ -36,7 +36,7 @@ last_review_base: ''
 ## Log
 
 ### Iteration 1
-- [ ] dev-implement-plan
-- [ ] dev-qa
+- [x] dev-implement-plan
+- [x] dev-qa
 - [ ] dev-code-review
 - [ ] decide
