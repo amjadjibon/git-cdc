@@ -122,7 +122,11 @@ impl OpendalStore {
     /// grace period needs it. Falls back to a per-entry stat when the
     /// service's listing omits timestamps; `None` if that fails too.
     pub async fn list(&self) -> Result<Vec<(blake3::Hash, Option<SystemTime>)>> {
-        let path = if self.prefix.is_empty() { "/" } else { &self.prefix };
+        let path = if self.prefix.is_empty() {
+            "/"
+        } else {
+            &self.prefix
+        };
         let entries = match self.op.list(path).await {
             Ok(entries) => entries,
             // A store that has never seen a put has no prefix directory yet.

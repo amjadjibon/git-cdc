@@ -44,7 +44,10 @@ async fn round_trip_remove_and_gc_listing() {
     let listed = store.list().await.unwrap();
     assert_eq!(listed.len(), 1);
     assert_eq!(listed[0].0, hash);
-    assert!(listed[0].1.is_some(), "fs listing must carry an mtime for GC");
+    assert!(
+        listed[0].1.is_some(),
+        "fs listing must carry an mtime for GC"
+    );
 
     store.remove(&hash).await.unwrap();
     assert!(!store.has(&hash).await.unwrap());
@@ -108,11 +111,7 @@ async fn server_round_trip_and_gc_over_opendal() {
         .unwrap();
     assert_eq!(r.status(), 200);
 
-    let got = c
-        .get(format!("{base}/chunks/{oid}"))
-        .send()
-        .await
-        .unwrap();
+    let got = c.get(format!("{base}/chunks/{oid}")).send().await.unwrap();
     assert_eq!(got.status(), 200);
     assert_eq!(got.bytes().await.unwrap().as_ref(), &data[..]);
 
@@ -130,10 +129,6 @@ async fn server_round_trip_and_gc_over_opendal() {
         .await
         .unwrap();
     assert_eq!(resp.deleted, vec![oid.clone()]);
-    let gone = c
-        .get(format!("{base}/chunks/{oid}"))
-        .send()
-        .await
-        .unwrap();
+    let gone = c.get(format!("{base}/chunks/{oid}")).send().await.unwrap();
     assert_eq!(gone.status(), 404);
 }

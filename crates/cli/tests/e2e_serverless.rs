@@ -112,8 +112,16 @@ fn serverless_push_clone_pull_gc() {
             store.remove(&hash).await.unwrap();
         }
     });
-    let count_bucket =
-        || rt.block_on(async { OpendalStore::connect(&config).unwrap().list().await.unwrap().len() });
+    let count_bucket = || {
+        rt.block_on(async {
+            OpendalStore::connect(&config)
+                .unwrap()
+                .list()
+                .await
+                .unwrap()
+                .len()
+        })
+    };
 
     let tmp = tempfile::tempdir().unwrap();
 

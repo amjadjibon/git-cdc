@@ -203,8 +203,7 @@ fn cmd_diff_repo() -> Result<()> {
         let head = (head.status.success() && is_manifest(&head.stdout))
             .then(|| Manifest::parse(&head.stdout))
             .transpose()?;
-        let (added_n, added, removed_n, removed, total) =
-            diff_stats(head.as_ref(), Some(&index));
+        let (added_n, added, removed_n, removed, total) = diff_stats(head.as_ref(), Some(&index));
         if added_n == 0 && removed_n == 0 {
             continue;
         }
