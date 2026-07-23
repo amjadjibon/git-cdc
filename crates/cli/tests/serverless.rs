@@ -11,12 +11,12 @@ use std::process::Command;
 use git_cdc_core::chunker::test_util::test_data;
 use git_cdc_core::store::{OpendalConfig, OpendalStore};
 
-mod common;
+mod utils;
 
-use common::{BIN, cdc, git};
+use utils::{BIN, cdc, git};
 
 fn setup_repo(repo: &Path, remote_root: &Path) {
-    common::base_setup_repo(repo);
+    utils::base_setup_repo(repo);
     git(repo, &["config", "cdc.opendal.scheme", "fs"]);
     git(
         repo,
@@ -217,7 +217,7 @@ fn serverless_malformed_opendal_option_errors_clearly() {
     let dir = tempfile::tempdir().unwrap();
     let repo = dir.path();
     git(repo, &["init", "-q"]);
-    common::base_setup_repo(repo);
+    utils::base_setup_repo(repo);
     git(repo, &["config", "cdc.opendal.scheme", "fs"]);
     git(
         repo,

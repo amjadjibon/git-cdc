@@ -11,9 +11,9 @@ use git_cdc_core::chunker::test_util::test_data;
 use git_cdc_core::store::DiskStore;
 use git_cdc_server::{AppState, Backend, app};
 
-mod common;
+mod utils;
 
-use common::{BIN, cdc, git, git_cmd};
+use utils::{BIN, cdc, git, git_cmd};
 
 const TOKEN: &str = "e2e-token";
 
@@ -41,7 +41,7 @@ fn spawn_server(root: PathBuf, grace: Duration) -> String {
 }
 
 fn setup_repo(repo: &Path, server_url: &str) {
-    common::base_setup_repo(repo);
+    utils::base_setup_repo(repo);
     git(repo, &["config", "cdc.url", server_url]);
     git(repo, &["config", "cdc.token", TOKEN]);
 }

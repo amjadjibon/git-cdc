@@ -6,15 +6,15 @@ use std::process::Command;
 
 use git_cdc_core::chunker::test_util::test_data;
 
-mod common;
+mod utils;
 
-use common::{BIN, cdc, git};
+use utils::{BIN, cdc, git};
 
 fn scratch_repo() -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
     let repo = dir.path();
     git(repo, &["init", "-q"]);
-    common::base_setup_repo(repo);
+    utils::base_setup_repo(repo);
     cdc(repo, &["track", "*.bin"]);
     dir
 }
