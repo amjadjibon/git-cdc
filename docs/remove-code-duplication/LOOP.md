@@ -8,7 +8,7 @@ max_iterations: 2
 max_phases: 1
 max_agents: 2
 current_iteration: 1
-status: awaiting-approval
+status: complete
 last_review_base: 'main'
 ---
 
