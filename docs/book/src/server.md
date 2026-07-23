@@ -13,27 +13,36 @@ git-cdc-server --root /srv/cdc --token my-secret --listen 0.0.0.0:8077
 Chunks land in `/srv/cdc` using the same sharded content-addressed layout
 as the client's local store.
 
-## S3 backend
+## Store backend
 
-The server itself can keep its bytes in a bucket — clients still speak the
-batch API and never see S3:
+The server itself can keep its bytes in a remote object-storage service —
+s3, azblob, azfile, b2, dropbox, gcs, sftp, ftp, gdrive, swift, webdav,
+onedrive (routed through [OpenDAL](https://opendal.apache.org), an
+implementation detail none of the flags below name) — clients still speak
+the batch API and never see the underlying service:
 
 ```sh
-git-cdc-server --backend s3 --s3-bucket my-chunks \
-  --s3-endpoint http://127.0.0.1:9000 --s3-force-path-style \
+git-cdc-server --backend store --store-scheme s3 \
+  --store-option bucket=my-chunks \
+  --store-option region=us-east-1 \
+  --store-option endpoint=http://127.0.0.1:9000 \
+  --store-option enable_virtual_host_style=false \
   --token my-secret
 ```
+
+`region` is required (or set `AWS_REGION`/`AWS_DEFAULT_REGION`) even for
+S3-compatible services like MinIO that ignore its value — OpenDAL's S3
+backend has no built-in fallback.
 
 ## Flags
 
 | Flag | Default | Meaning |
 | ---- | ------- | ------- |
-| `--backend` | `disk` | `disk` or `s3` |
+| `--backend` | `disk` | `disk` or `store` |
 | `--root` | — | chunk directory (required for disk) |
-| `--s3-bucket` | — | bucket (required for s3) |
-| `--s3-prefix` | `""` | key prefix |
-| `--s3-endpoint` | — | MinIO/R2 endpoint override |
-| `--s3-force-path-style` | off | path-style addressing (MinIO) |
+| `--store-scheme` | — | storage service (required for store), e.g. `s3`, `azblob`, `gcs` |
+| `--store-option KEY=VALUE` | — | service option, repeatable |
+| `--store-prefix` | `chunks/` | key prefix inside the service |
 | `--token` | — | static bearer token (env: `GIT_CDC_TOKEN`) |
 | `--listen` | `127.0.0.1:8077` | bind address (env: `GIT_CDC_LISTEN`) |
 | `--grace-secs` | `86400` | GC grace period for server-side sweeps |

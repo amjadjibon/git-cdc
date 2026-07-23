@@ -9,10 +9,14 @@ blake3 = { version = "1", features = ["std"] }
 fastcdc = "4.0.1"
 opendal = { version = "0.57", default-features = false, features = [
     "services-azblob",
+    "services-azfile",
+    "services-b2",
+    "services-dropbox",
     "services-gcs",
     "services-sftp",
     "services-ftp",
     "services-gdrive",
+    "services-swift",
     "services-webdav",
     "services-onedrive",
     "services-s3",

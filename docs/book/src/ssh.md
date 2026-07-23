@@ -36,9 +36,9 @@ and speak a small pkt-line request protocol over the pipe (`has`, `put`,
   missing chunks (envelope/compressed form, no re-encoding).
 - **pull** — fetches missing chunks, hash-verified locally before
   admission.
-- **gc** — like serverless S3, the CLI owns the sweep: remote file
+- **gc** — like serverless mode, the CLI owns the sweep: remote file
   mtimes from `list` feed the `--grace-secs` window.
-- Remote selection precedence: `cdc.s3.bucket` > `cdc.ssh.remote` >
+- Remote selection precedence: `cdc.store.scheme` > `cdc.ssh.remote` >
   `cdc.url`.
 
 `cdc.ssh.command` (advanced) replaces the entire ssh invocation with an

@@ -73,7 +73,7 @@ mod tests {
     #[test]
     fn incompressible_stays_raw() {
         // xorshift noise doesn't compress.
-        let raw = crate::chunker::tests::test_data(256 * 1024, 9);
+        let raw = crate::chunker::test_util::test_data(256 * 1024, 9);
         let hash = blake3::hash(&raw);
         let enc = encode(&raw);
         assert_eq!(enc[0], TAG_RAW);

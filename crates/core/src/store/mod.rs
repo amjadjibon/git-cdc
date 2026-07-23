@@ -4,7 +4,7 @@
 
 pub mod disk;
 pub mod envelope;
-pub mod opendal;
+mod opendal;
 
 pub use disk::DiskStore;
 pub use opendal::{OpendalConfig, OpendalStore};

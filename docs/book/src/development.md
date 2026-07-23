@@ -6,7 +6,7 @@
 crates/
 ├── core/         # git-cdc-core: chunker, manifest, stores, protocol, client
 ├── cli/          # git-cdc-cli: the `git-cdc` binary (filters, push/pull/gc, transports)
-└── server/       # git-cdc-server: axum batch API over disk or S3
+└── server/       # git-cdc-server: axum batch API over disk or any OpenDAL service
 docs/
 ├── book/         # this book (mdbook)
 ├── spec/         # normative manifest spec
@@ -19,32 +19,25 @@ docs/
 cargo test --workspace
 ```
 
-That single command runs everything — including the S3 suites, which
-self-host an in-process S3 server
-([`s3s-fs`](https://crates.io/crates/s3s-fs) over a temp dir) so no docker
-or MinIO is needed. The suites:
+That single command runs everything — including the serverless suite,
+which exercises the OpenDAL remote against the `fs` scheme in a temp dir,
+so no docker or MinIO is needed. The suites:
 
 - unit tests: chunker (bounds, dedup, params), manifest (round-trip,
   strictness), stores, protocol wire format;
-- `e2e_filter`: real `git add`/`git checkout` against scratch repos —
+- `filter`: real `git add`/`git checkout` against scratch repos —
   byte-identical restore, passthrough safety, corrupt-store refusal,
   chunk-size config;
-- `e2e_full`: an in-process server — dedup on second push, pre-push hook
+- `full`: an in-process server — dedup on second push, pre-push hook
   guard, fresh clone, pull, GC;
-- `e2e_serverless`: the same cycle straight against a bucket;
+- `serverless`: the same cycle straight against an OpenDAL remote (`fs`
+  scheme locally — any other service is OpenDAL's contract to verify);
+- `ssh`: the same cycle over the stdio transport;
 - server integration: auth, negotiation, upload verification, body limits,
   GC grace.
 
 Every test subprocess runs with `GIT_CONFIG_GLOBAL=/dev/null` — your real
 gitconfig never leaks into scratch repos.
-
-To point the S3 suites at a real store instead (worth one run per release):
-
-```sh
-GIT_CDC_TEST_S3_ENDPOINT=http://127.0.0.1:9000 \
-AWS_ACCESS_KEY_ID=… AWS_SECRET_ACCESS_KEY=… \
-cargo test --workspace
-```
 
 ## Benchmarks
 

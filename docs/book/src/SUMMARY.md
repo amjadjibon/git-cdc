@@ -7,7 +7,7 @@
 - [Getting Started](getting-started.md)
 - [How It Works](how-it-works.md)
 - [Configuration](configuration.md)
-- [Serverless S3 Mode](serverless.md)
+- [Serverless Mode](serverless.md)
 - [SSH Transport](ssh.md)
 - [Running a Server](server.md)
 - [Garbage Collection](gc.md)

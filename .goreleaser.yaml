@@ -9,7 +9,7 @@ builds:
     command: zigbuild
     flags:
       - --release
-      - -p=git-cdc-core
+      - -p=git-cdc-cli
     targets:
       - x86_64-unknown-linux-gnu
       - aarch64-unknown-linux-gnu

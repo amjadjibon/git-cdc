@@ -6,8 +6,10 @@ use std::time::Duration;
 
 use git_cdc_core::protocol::{GcRequest, GcResponse};
 use git_cdc_core::store::envelope;
-use git_cdc_core::store::opendal::{OpendalConfig, OpendalStore};
+use git_cdc_core::store::{OpendalConfig, OpendalStore};
 use git_cdc_server::{AppState, Backend, app};
+
+mod utils;
 
 fn fs_store(root: &std::path::Path) -> OpendalStore {
     OpendalStore::connect(&OpendalConfig {
@@ -44,7 +46,10 @@ async fn round_trip_remove_and_gc_listing() {
     let listed = store.list().await.unwrap();
     assert_eq!(listed.len(), 1);
     assert_eq!(listed[0].0, hash);
-    assert!(listed[0].1.is_some(), "fs listing must carry an mtime for GC");
+    assert!(
+        listed[0].1.is_some(),
+        "fs listing must carry an mtime for GC"
+    );
 
     store.remove(&hash).await.unwrap();
     assert!(!store.has(&hash).await.unwrap());
@@ -90,12 +95,7 @@ async fn server_round_trip_and_gc_over_opendal() {
         axum::serve(listener, app(state)).await.unwrap();
     });
 
-    let mut headers = reqwest::header::HeaderMap::new();
-    headers.insert("authorization", "Bearer test-token".parse().unwrap());
-    let c = reqwest::Client::builder()
-        .default_headers(headers)
-        .build()
-        .unwrap();
+    let c = utils::client();
 
     let data = b"opendal e2e chunk".to_vec();
     let oid = format!("blake3:{}", blake3::hash(&data).to_hex());
@@ -108,11 +108,7 @@ async fn server_round_trip_and_gc_over_opendal() {
         .unwrap();
     assert_eq!(r.status(), 200);
 
-    let got = c
-        .get(format!("{base}/chunks/{oid}"))
-        .send()
-        .await
-        .unwrap();
+    let got = c.get(format!("{base}/chunks/{oid}")).send().await.unwrap();
     assert_eq!(got.status(), 200);
     assert_eq!(got.bytes().await.unwrap().as_ref(), &data[..]);
 
@@ -130,10 +126,6 @@ async fn server_round_trip_and_gc_over_opendal() {
         .await
         .unwrap();
     assert_eq!(resp.deleted, vec![oid.clone()]);
-    let gone = c
-        .get(format!("{base}/chunks/{oid}"))
-        .send()
-        .await
-        .unwrap();
+    let gone = c.get(format!("{base}/chunks/{oid}")).send().await.unwrap();
     assert_eq!(gone.status(), 404);
 }

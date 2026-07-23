@@ -2,81 +2,21 @@
 //! against a scratch repo, byte-identical restore, manifest in the blob.
 
 use std::fs;
-use std::path::Path;
 use std::process::Command;
 
-const BIN: &str = env!("CARGO_BIN_EXE_git-cdc");
+use git_cdc_core::chunker::test_util::test_data;
 
-fn git(repo: &Path, args: &[&str]) -> String {
-    let out = Command::new("git")
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_SYSTEM", "/dev/null")
-        .args(args)
-        .current_dir(repo)
-        .output()
-        .unwrap();
-    assert!(
-        out.status.success(),
-        "git {args:?} failed: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    String::from_utf8_lossy(&out.stdout).into_owned()
-}
+mod utils;
 
-fn cdc(repo: &Path, args: &[&str]) {
-    let out = Command::new(BIN)
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_SYSTEM", "/dev/null")
-        .args(args)
-        .current_dir(repo)
-        .output()
-        .unwrap();
-    assert!(
-        out.status.success(),
-        "git-cdc {args:?} failed: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-}
+use utils::{BIN, cdc, git};
 
 fn scratch_repo() -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
     let repo = dir.path();
     git(repo, &["init", "-q"]);
-    git(repo, &["config", "user.email", "test@example.com"]);
-    git(repo, &["config", "user.name", "Test"]);
-    cdc(repo, &["install"]);
-    // install writes `git-cdc clean` expecting the binary on $PATH; tests
-    // must run the freshly built binary, so point config at it directly.
-    git(
-        repo,
-        &["config", "filter.cdc.clean", &format!("{BIN} clean")],
-    );
-    git(
-        repo,
-        &["config", "filter.cdc.smudge", &format!("{BIN} smudge")],
-    );
-    git(
-        repo,
-        &[
-            "config",
-            "filter.cdc.process",
-            &format!("{BIN} filter-process"),
-        ],
-    );
+    utils::base_setup_repo(repo);
     cdc(repo, &["track", "*.bin"]);
     dir
-}
-
-fn test_data(len: usize, seed: u64) -> Vec<u8> {
-    let mut state = seed | 1;
-    (0..len)
-        .map(|_| {
-            state ^= state << 13;
-            state ^= state >> 7;
-            state ^= state << 17;
-            state as u8
-        })
-        .collect()
 }
 
 #[test]

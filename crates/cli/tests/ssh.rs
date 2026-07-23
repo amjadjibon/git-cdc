@@ -5,67 +5,16 @@
 
 use std::fs;
 use std::path::Path;
-use std::process::Command;
 
+use git_cdc_core::chunker::test_util::test_data;
 use git_cdc_core::store::DiskStore;
 
-const BIN: &str = env!("CARGO_BIN_EXE_git-cdc");
+mod utils;
 
-fn git(repo: &Path, args: &[&str]) -> String {
-    let bin_dir = Path::new(BIN).parent().unwrap();
-    let path = format!("{}:{}", bin_dir.display(), std::env::var("PATH").unwrap());
-    let out = Command::new("git")
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_SYSTEM", "/dev/null")
-        .env("PATH", path)
-        .args(args)
-        .current_dir(repo)
-        .output()
-        .unwrap();
-    assert!(
-        out.status.success(),
-        "git {args:?} failed: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    String::from_utf8_lossy(&out.stdout).into_owned()
-}
-
-fn cdc(repo: &Path, args: &[&str]) -> String {
-    let out = Command::new(BIN)
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_SYSTEM", "/dev/null")
-        .args(args)
-        .current_dir(repo)
-        .output()
-        .unwrap();
-    assert!(
-        out.status.success(),
-        "git-cdc {args:?} failed: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    String::from_utf8_lossy(&out.stderr).into_owned()
-}
+use utils::{BIN, cdc, git};
 
 fn setup_repo(repo: &Path, remote_root: &Path) {
-    git(repo, &["config", "user.email", "test@example.com"]);
-    git(repo, &["config", "user.name", "Test"]);
-    cdc(repo, &["install"]);
-    git(
-        repo,
-        &["config", "filter.cdc.clean", &format!("{BIN} clean")],
-    );
-    git(
-        repo,
-        &["config", "filter.cdc.smudge", &format!("{BIN} smudge")],
-    );
-    git(
-        repo,
-        &[
-            "config",
-            "filter.cdc.process",
-            &format!("{BIN} filter-process"),
-        ],
-    );
+    utils::base_setup_repo(repo);
     git(
         repo,
         &[
@@ -74,18 +23,6 @@ fn setup_repo(repo: &Path, remote_root: &Path) {
             &format!("{BIN} stdio --root {}", remote_root.display()),
         ],
     );
-}
-
-fn test_data(len: usize, seed: u64) -> Vec<u8> {
-    let mut state = seed | 1;
-    (0..len)
-        .map(|_| {
-            state ^= state << 13;
-            state ^= state >> 7;
-            state ^= state << 17;
-            state as u8
-        })
-        .collect()
 }
 
 fn remote_chunk_count(root: &Path) -> usize {

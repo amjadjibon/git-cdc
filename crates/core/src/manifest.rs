@@ -267,7 +267,7 @@ mod tests {
 
     #[test]
     fn chunker_to_manifest_round_trip_reassembles() {
-        let data = crate::chunker::tests::test_data(5 * 1024 * 1024, 3);
+        let data = crate::chunker::test_util::test_data(5 * 1024 * 1024, 3);
         let mut store: std::collections::HashMap<blake3::Hash, Vec<u8>> =
             std::collections::HashMap::new();
         let (chunks, oid, size) =

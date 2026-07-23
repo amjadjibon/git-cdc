@@ -5,24 +5,12 @@
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use std::hint::black_box;
 
+use git_cdc_core::chunker::test_util::test_data;
 use git_cdc_core::chunker::{ChunkParams, chunk_stream};
 use git_cdc_core::manifest::Manifest;
 use git_cdc_core::pktline::{PktReader, PktWriter};
 use git_cdc_core::store::envelope;
 use git_cdc_core::store::{ChunkStore, DiskStore};
-
-/// Deterministic pseudo-random bytes (same xorshift as the test suites).
-fn test_data(len: usize, seed: u64) -> Vec<u8> {
-    let mut state = seed | 1;
-    (0..len)
-        .map(|_| {
-            state ^= state << 13;
-            state ^= state >> 7;
-            state ^= state << 17;
-            state as u8
-        })
-        .collect()
-}
 
 fn compressible_data(len: usize) -> Vec<u8> {
     b"the same line of text over and over again and again\n"

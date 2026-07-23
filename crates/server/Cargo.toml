@@ -13,8 +13,5 @@ serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net"] }
 
 [dev-dependencies]
-hyper-util = "0.1.20"
 reqwest = { version = "0.13.4", features = ["json"] }
-s3s = "0.14.1"
-s3s-fs = "0.14.1"
 tempfile = "3"
