@@ -1,0 +1,17 @@
+# Run git-cdc-server locally:
+#   GIT_CDC_TOKEN=my-secret docker compose up --build
+services:
+  git-cdc-server:
+    build:
+      context: .
+      dockerfile: Containerfile
+    ports:
+      - "8077:8077"
+    environment:
+      GIT_CDC_TOKEN: "${GIT_CDC_TOKEN:?set GIT_CDC_TOKEN in the environment or a .env file}"
+    volumes:
+      - cdc-data:/data
+    restart: unless-stopped
+
+volumes:
+  cdc-data:
