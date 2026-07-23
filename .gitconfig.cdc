@@ -12,21 +12,35 @@
 	clean = git-cdc clean
 	smudge = git-cdc smudge
 
-# --- Remote: pick ONE of the two modes ---------------------------------
+# --- Remote: pick ONE of the modes below --------------------------------
 
 # Mode 1: git-cdc-server (central auth, batch API)
 # [cdc]
 # 	url = http://your-server:8077
 # 	token = your-secret-token
 
-# Mode 2: serverless — CLI talks straight to an S3-compatible bucket.
-# Credentials come from the AWS chain (env vars, ~/.aws, IMDS), never
-# from gitconfig. If cdc.s3.bucket is set it wins over cdc.url.
-# [cdc "s3"]
-# 	bucket = git-cdc
+# Mode 2: serverless — CLI talks straight to any OpenDAL service (s3,
+# azblob, gcs, dropbox, b2, sftp, ftp, gdrive, swift, webdav, onedrive).
+# Credentials come from each service's own standard chain (for S3: env
+# vars, ~/.aws, IMDS), never from gitconfig. If cdc.opendal.scheme is set
+# it wins over cdc.url. `option` may repeat, one KEY=VALUE pair per line.
+#
+# Real AWS S3 — region and enable_virtual_host_style are required; OpenDAL
+# has no built-in default for either (unlike the old cdc.s3.* flags).
+# [cdc "opendal"]
+# 	scheme = s3
+# 	option = bucket=git-cdc
+# 	option = region=us-east-1
+# 	option = enable_virtual_host_style=true
 # 	prefix = chunks/
-# 	endpoint = http://127.0.0.1:9000     ; MinIO/RustFS/R2 only — omit for AWS
-# 	force-path-style = true              ; MinIO only
+#
+# MinIO / RustFS / R2 (path-style, custom endpoint):
+# [cdc "opendal"]
+# 	scheme = s3
+# 	option = bucket=git-cdc
+# 	option = region=us-east-1
+# 	option = endpoint=http://127.0.0.1:9000
+# 	prefix = chunks/
 
 # Mode 3: SSH — chunks on any host you can ssh into (git-cdc must be
 # installed there). Access control is your ssh keys + file permissions.
