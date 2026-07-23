@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use git_cdc_core::protocol::{GcRequest, GcResponse};
 use git_cdc_core::store::envelope;
-use git_cdc_core::store::opendal::{OpendalConfig, OpendalStore};
+use git_cdc_core::store::{OpendalConfig, OpendalStore};
 use git_cdc_server::{AppState, Backend, app};
 
 mod utils;
