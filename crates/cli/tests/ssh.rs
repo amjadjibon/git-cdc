@@ -9,12 +9,12 @@ use std::path::Path;
 use git_cdc_core::chunker::test_util::test_data;
 use git_cdc_core::store::DiskStore;
 
-mod support;
+mod common;
 
-use support::{BIN, cdc, git};
+use common::{BIN, cdc, git};
 
 fn setup_repo(repo: &Path, remote_root: &Path) {
-    support::base_setup_repo(repo);
+    common::base_setup_repo(repo);
     git(
         repo,
         &[
