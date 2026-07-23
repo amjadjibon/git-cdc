@@ -4,9 +4,9 @@ use git_cdc_core::protocol::*;
 use git_cdc_core::store::DiskStore;
 use git_cdc_server::{AppState, Backend, app};
 
-mod support;
+mod utils;
 
-use support::client;
+use utils::client;
 
 async fn spawn_server(grace: Duration) -> (String, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();

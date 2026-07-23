@@ -9,7 +9,7 @@ use git_cdc_core::store::envelope;
 use git_cdc_core::store::opendal::{OpendalConfig, OpendalStore};
 use git_cdc_server::{AppState, Backend, app};
 
-mod support;
+mod utils;
 
 fn fs_store(root: &std::path::Path) -> OpendalStore {
     OpendalStore::connect(&OpendalConfig {
@@ -95,7 +95,7 @@ async fn server_round_trip_and_gc_over_opendal() {
         axum::serve(listener, app(state)).await.unwrap();
     });
 
-    let c = support::client();
+    let c = utils::client();
 
     let data = b"opendal e2e chunk".to_vec();
     let oid = format!("blake3:{}", blake3::hash(&data).to_hex());
