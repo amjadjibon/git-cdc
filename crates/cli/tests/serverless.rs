@@ -1,8 +1,8 @@
-//! Serverless opendal e2e (PLAN 3.2): track → commit → push straight to a
+//! Serverless e2e (PLAN 3.2): track → commit → push straight to a
 //! remote store (no git-cdc server) → fresh clone → pull → gc. Exercises
-//! the generic `cdc.opendal.*` remote against the `fs` scheme — the wire
-//! shape is identical for every other OpenDAL service (s3, azblob, gcs,
-//! ...), which is OpenDAL's contract to verify, not ours.
+//! the generic `cdc.store.*` remote against the `fs` scheme — the wire
+//! shape is identical for every other OpenDAL-backed service (s3, azblob,
+//! gcs, ...), which is OpenDAL's contract to verify, not ours.
 
 use std::fs;
 use std::path::Path;
@@ -17,16 +17,16 @@ use utils::{BIN, cdc, git};
 
 fn setup_repo(repo: &Path, remote_root: &Path) {
     utils::base_setup_repo(repo);
-    git(repo, &["config", "cdc.opendal.scheme", "fs"]);
+    git(repo, &["config", "cdc.store.scheme", "fs"]);
     git(
         repo,
         &[
             "config",
-            "cdc.opendal.option",
+            "cdc.store.option",
             &format!("root={}", remote_root.display()),
         ],
     );
-    git(repo, &["config", "cdc.opendal.prefix", "chunks/"]);
+    git(repo, &["config", "cdc.store.prefix", "chunks/"]);
 }
 
 #[test]
@@ -210,18 +210,18 @@ fn serverless_gc_keeps_chunks_within_grace_period() {
     );
 }
 
-/// A malformed `cdc.opendal.option` (missing `=`) must fail loudly and name
+/// A malformed `cdc.store.option` (missing `=`) must fail loudly and name
 /// the bad entry, not panic or silently drop it.
 #[test]
-fn serverless_malformed_opendal_option_errors_clearly() {
+fn serverless_malformed_store_option_errors_clearly() {
     let dir = tempfile::tempdir().unwrap();
     let repo = dir.path();
     git(repo, &["init", "-q"]);
     utils::base_setup_repo(repo);
-    git(repo, &["config", "cdc.opendal.scheme", "fs"]);
+    git(repo, &["config", "cdc.store.scheme", "fs"]);
     git(
         repo,
-        &["config", "--add", "cdc.opendal.option", "no-equals-sign"],
+        &["config", "--add", "cdc.store.option", "no-equals-sign"],
     );
     cdc(repo, &["track", "*.bin"]);
     fs::write(repo.join("asset.bin"), test_data(1024, 1)).unwrap();

@@ -128,7 +128,7 @@ fn sync_without_remote_config_names_both_options() {
     assert!(!out.status.success());
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(
-        err.contains("cdc.url") && err.contains("cdc.opendal.scheme"),
+        err.contains("cdc.url") && err.contains("cdc.store.scheme"),
         "error must name both remote options: {err}"
     );
 }

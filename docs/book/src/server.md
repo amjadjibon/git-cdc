@@ -13,19 +13,20 @@ git-cdc-server --root /srv/cdc --token my-secret --listen 0.0.0.0:8077
 Chunks land in `/srv/cdc` using the same sharded content-addressed layout
 as the client's local store.
 
-## OpenDAL backend
+## Store backend
 
-The server itself can keep its bytes in any [OpenDAL](https://opendal.apache.org)
-service — s3, azblob, azfile, b2, dropbox, gcs, sftp, ftp, gdrive, swift,
-webdav, onedrive — clients still speak the batch API and never see the
-underlying service:
+The server itself can keep its bytes in a remote object-storage service —
+s3, azblob, azfile, b2, dropbox, gcs, sftp, ftp, gdrive, swift, webdav,
+onedrive (routed through [OpenDAL](https://opendal.apache.org), an
+implementation detail none of the flags below name) — clients still speak
+the batch API and never see the underlying service:
 
 ```sh
-git-cdc-server --backend opendal --opendal-scheme s3 \
-  --opendal-option bucket=my-chunks \
-  --opendal-option region=us-east-1 \
-  --opendal-option endpoint=http://127.0.0.1:9000 \
-  --opendal-option enable_virtual_host_style=false \
+git-cdc-server --backend store --store-scheme s3 \
+  --store-option bucket=my-chunks \
+  --store-option region=us-east-1 \
+  --store-option endpoint=http://127.0.0.1:9000 \
+  --store-option enable_virtual_host_style=false \
   --token my-secret
 ```
 
@@ -37,11 +38,11 @@ backend has no built-in fallback.
 
 | Flag | Default | Meaning |
 | ---- | ------- | ------- |
-| `--backend` | `disk` | `disk` or `opendal` |
+| `--backend` | `disk` | `disk` or `store` |
 | `--root` | — | chunk directory (required for disk) |
-| `--opendal-scheme` | — | OpenDAL service (required for opendal), e.g. `s3`, `azblob`, `gcs` |
-| `--opendal-option KEY=VALUE` | — | service option, repeatable |
-| `--opendal-prefix` | `chunks/` | key prefix inside the service |
+| `--store-scheme` | — | storage service (required for store), e.g. `s3`, `azblob`, `gcs` |
+| `--store-option KEY=VALUE` | — | service option, repeatable |
+| `--store-prefix` | `chunks/` | key prefix inside the service |
 | `--token` | — | static bearer token (env: `GIT_CDC_TOKEN`) |
 | `--listen` | `127.0.0.1:8077` | bind address (env: `GIT_CDC_LISTEN`) |
 | `--grace-secs` | `86400` | GC grace period for server-side sweeps |

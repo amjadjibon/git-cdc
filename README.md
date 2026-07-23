@@ -79,26 +79,26 @@ path-style unless you set `enable_virtual_host_style=true`:
 ```sh
 # Real AWS S3
 git cdc install
-git config cdc.opendal.scheme s3
-git config --add cdc.opendal.option bucket=my-chunks
-git config --add cdc.opendal.option region=us-east-1                    # or export AWS_REGION
-git config --add cdc.opendal.option enable_virtual_host_style=true       # AWS recommends this addressing mode
-git config cdc.opendal.prefix chunks/                                   # optional, default chunks/
+git config cdc.store.scheme s3
+git config --add cdc.store.option bucket=my-chunks
+git config --add cdc.store.option region=us-east-1                    # or export AWS_REGION
+git config --add cdc.store.option enable_virtual_host_style=true       # AWS recommends this addressing mode
+git config cdc.store.prefix chunks/                                   # optional, default chunks/
 git cdc track '*.dat'
 
 # MinIO / R2 (path-style, custom endpoint)
-git config cdc.opendal.scheme s3
-git config --add cdc.opendal.option bucket=my-chunks
-git config --add cdc.opendal.option region=us-east-1
-git config --add cdc.opendal.option endpoint=http://127.0.0.1:9000
+git config cdc.store.scheme s3
+git config --add cdc.store.option bucket=my-chunks
+git config --add cdc.store.option region=us-east-1
+git config --add cdc.store.option endpoint=http://127.0.0.1:9000
 git cdc track '*.dat'
 ```
 
-`cdc.opendal.option` may be repeated (`git config --add`), one `KEY=VALUE`
+`cdc.store.option` may be repeated (`git config --add`), one `KEY=VALUE`
 pair per service option — passed to OpenDAL verbatim, same convention as
-the server's `--opendal-option` flag. `push`/`pull`/`gc` then negotiate
+the server's `--store-option` flag. `push`/`pull`/`gc` then negotiate
 against the service directly (one listing instead of a batch call). If
-`cdc.opendal.scheme` is set it wins over `cdc.url`.
+`cdc.store.scheme` is set it wins over `cdc.url`.
 
 ### SSH transport (no server, no bucket)
 
@@ -114,7 +114,7 @@ git cdc track '*.dat'
 
 The CLI runs `ssh user@host git-cdc stdio --root /srv/cdc-chunks` and
 speaks a pkt-line protocol over the pipe; your ssh config (keys, agents,
-jump hosts) applies as-is. Precedence: `cdc.opendal.scheme` >
+jump hosts) applies as-is. Precedence: `cdc.store.scheme` >
 `cdc.ssh.remote` > `cdc.url`.
 
 ### Compression
@@ -129,43 +129,43 @@ Format: [docs/spec/chunk-storage.md](docs/spec/chunk-storage.md).
 
 The server itself can also store chunks in a remote service instead of
 local disk — central token auth stays, the service holds the bytes. The
-`opendal` backend routes chunk storage through
+`store` backend routes chunk storage through
 [Apache OpenDAL](https://opendal.apache.org/): pick a scheme and pass its
-options as repeatable `--opendal-option KEY=VALUE` flags (passed to OpenDAL
+options as repeatable `--store-option KEY=VALUE` flags (passed to OpenDAL
 verbatim — see the [service docs](https://docs.rs/opendal/latest/opendal/services/)
 for each scheme's keys):
 
 ```sh
 # S3-compatible (AWS, MinIO, R2) — region is required (or set AWS_REGION),
 # even for services that ignore its value; OpenDAL has no built-in fallback
-git-cdc-server --backend opendal --opendal-scheme s3 \
-  --opendal-option bucket=my-chunks \
-  --opendal-option region=us-east-1 \
-  --opendal-option endpoint=http://127.0.0.1:9000 \
-  --opendal-option enable_virtual_host_style=false \
+git-cdc-server --backend store --store-scheme s3 \
+  --store-option bucket=my-chunks \
+  --store-option region=us-east-1 \
+  --store-option endpoint=http://127.0.0.1:9000 \
+  --store-option enable_virtual_host_style=false \
   --token <secret>
 
 # Azure Blob
-git-cdc-server --backend opendal --opendal-scheme azblob \
-  --opendal-option container=my-chunks \
-  --opendal-option account_name=me --opendal-option account_key=... \
+git-cdc-server --backend store --store-scheme azblob \
+  --store-option container=my-chunks \
+  --store-option account_name=me --store-option account_key=... \
   --token <secret>
 
 # Google Cloud Storage
-git-cdc-server --backend opendal --opendal-scheme gcs \
-  --opendal-option bucket=my-chunks \
-  --opendal-option credential_path=/path/to/sa.json --token <secret>
+git-cdc-server --backend store --store-scheme gcs \
+  --store-option bucket=my-chunks \
+  --store-option credential_path=/path/to/sa.json --token <secret>
 
 # Nextcloud (or any WebDAV server)
-git-cdc-server --backend opendal --opendal-scheme webdav \
-  --opendal-option endpoint=https://cloud.example.com/remote.php/dav/files/me \
-  --opendal-option username=me --opendal-option password=<app-password> \
+git-cdc-server --backend store --store-scheme webdav \
+  --store-option endpoint=https://cloud.example.com/remote.php/dav/files/me \
+  --store-option username=me --store-option password=<app-password> \
   --token <secret>
 
 # SFTP (unix only, SSH key auth only — no passwords)
-git-cdc-server --backend opendal --opendal-scheme sftp \
-  --opendal-option endpoint=ssh://me@host \
-  --opendal-option key=/home/me/.ssh/id_ed25519 \
+git-cdc-server --backend store --store-scheme sftp \
+  --store-option endpoint=ssh://me@host \
+  --store-option key=/home/me/.ssh/id_ed25519 \
   --token <secret>
 ```
 
@@ -175,10 +175,10 @@ setups expire after ~1h) and have API quotas that make them a "works, not
 recommended" tier for chunk traffic. Plain `ftp` sends credentials in the
 clear — prefer FTPS or anything else on this list.
 
-Chunks land under `--opendal-prefix` (default `chunks/`). Alternatively, skip
+Chunks land under `--store-prefix` (default `chunks/`). Alternatively, skip
 all of this: `rclone serve s3 remote:` fronts every one of these services with
-an S3 API, and the existing `--backend s3` (or serverless mode) works against
-it unchanged.
+an S3 API, and `--backend store --store-scheme s3` (or serverless mode)
+works against it unchanged.
 
 Cloning:
 

@@ -9,17 +9,17 @@ applies.
 
 ```sh
 git cdc install
-git config cdc.opendal.scheme s3
-git config --add cdc.opendal.option bucket=my-chunks
-git config --add cdc.opendal.option region=us-east-1                 # required unless AWS_REGION is set
-git config --add cdc.opendal.option enable_virtual_host_style=true   # real AWS S3 — omit (or false) for MinIO
-git config --add cdc.opendal.option endpoint=http://127.0.0.1:9000   # MinIO/R2 only
-git config cdc.opendal.prefix chunks/                                # optional, default chunks/
+git config cdc.store.scheme s3
+git config --add cdc.store.option bucket=my-chunks
+git config --add cdc.store.option region=us-east-1                 # required unless AWS_REGION is set
+git config --add cdc.store.option enable_virtual_host_style=true   # real AWS S3 — omit (or false) for MinIO
+git config --add cdc.store.option endpoint=http://127.0.0.1:9000   # MinIO/R2 only
+git config cdc.store.prefix chunks/                                # optional, default chunks/
 git cdc track '*.dat'
 ```
 
-`cdc.opendal.option` may be set multiple times — one `KEY=VALUE` pair per
-service option, passed straight through to OpenDAL. If `cdc.opendal.scheme`
+`cdc.store.option` may be set multiple times — one `KEY=VALUE` pair per
+service option, passed straight through to OpenDAL. If `cdc.store.scheme`
 is set, it wins over `cdc.url` — unset it to switch back to server mode.
 
 ## How the serverless paths differ from server mode
@@ -57,8 +57,8 @@ export AWS_SECRET_ACCESS_KEY=minioadmin
 
 Unlike credentials, OpenDAL's S3 service does **not** default the region —
 set `AWS_REGION`/`AWS_DEFAULT_REGION` or an explicit `region`
-`cdc.opendal.option`; connecting fails loudly if neither is present. Every
+`cdc.store.option`; connecting fails loudly if neither is present. Every
 other OpenDAL service authenticates the same way it always does (its own
-env vars, files, or `cdc.opendal.option` entries) — see
+env vars, files, or `cdc.store.option` entries) — see
 [OpenDAL's service docs](https://opendal.apache.org/docs/category/services/)
 for the option names each scheme accepts.

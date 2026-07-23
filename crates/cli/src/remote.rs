@@ -194,27 +194,29 @@ pub enum Remote {
     Ssh(SshRemote),
 }
 
-/// `cdc.opendal.option` may be set multiple times (`git config --add`),
+/// `cdc.store.option` may be set multiple times (`git config --add`),
 /// one `KEY=VALUE` pair each — the same convention as the server's
-/// repeatable `--opendal-option` flag.
-fn opendal_options() -> Result<Vec<(String, String)>> {
-    git_out(&["config", "--get-all", "cdc.opendal.option"])
+/// repeatable `--store-option` flag. The underlying mechanism (currently
+/// OpenDAL) is an implementation detail, so neither the config keys nor
+/// this option shape name it.
+fn store_options() -> Result<Vec<(String, String)>> {
+    git_out(&["config", "--get-all", "cdc.store.option"])
         .unwrap_or_default()
         .lines()
         .map(|line| {
             line.split_once('=')
                 .map(|(k, v)| (k.to_string(), v.to_string()))
-                .with_context(|| format!("cdc.opendal.option {line:?} is not KEY=VALUE"))
+                .with_context(|| format!("cdc.store.option {line:?} is not KEY=VALUE"))
         })
         .collect()
 }
 
 pub fn remote() -> Result<Remote> {
-    if let Ok(scheme) = git_out(&["config", "--get", "cdc.opendal.scheme"]) {
+    if let Ok(scheme) = git_out(&["config", "--get", "cdc.store.scheme"]) {
         let config = git_cdc_core::store::OpendalConfig {
             scheme,
-            options: opendal_options()?,
-            prefix: git_out(&["config", "--get", "cdc.opendal.prefix"])
+            options: store_options()?,
+            prefix: git_out(&["config", "--get", "cdc.store.prefix"])
                 .unwrap_or_else(|_| "chunks/".into()),
         };
         let rt = tokio::runtime::Builder::new_current_thread()
@@ -243,7 +245,7 @@ pub fn remote() -> Result<Remote> {
     }
     let url = git_out(&["config", "--get", "cdc.url"]).context(
         "no remote configured; set cdc.url + cdc.token (server), \
-         cdc.opendal.scheme (serverless — s3, azblob, gcs, ...), \
+         cdc.store.scheme (serverless — s3, azblob, gcs, ...), \
          or cdc.ssh.remote + cdc.ssh.path (ssh)",
     )?;
     let token = git_out(&["config", "--get", "cdc.token"])

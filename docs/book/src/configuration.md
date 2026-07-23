@@ -9,14 +9,14 @@ globals, so you can keep machinery global and per-project choices local.
 | --- | ------- |
 | `cdc.url` | git-cdc-server base URL (server mode) |
 | `cdc.token` | Bearer token for that server |
-| `cdc.opendal.scheme` | Any OpenDAL service (`s3`, `azblob`, `gcs`, `dropbox`, ...) — **its presence selects serverless mode over `cdc.url`** |
-| `cdc.opendal.option` | Service option as `KEY=VALUE`, repeatable (`git config --add`), e.g. `bucket=my-chunks` |
-| `cdc.opendal.prefix` | Key prefix inside the service, e.g. `chunks/` (default) |
+| `cdc.store.scheme` | Any OpenDAL service (`s3`, `azblob`, `gcs`, `dropbox`, ...) — **its presence selects serverless mode over `cdc.url`** |
+| `cdc.store.option` | Service option as `KEY=VALUE`, repeatable (`git config --add`), e.g. `bucket=my-chunks` |
+| `cdc.store.prefix` | Key prefix inside the service, e.g. `chunks/` (default) |
 | `cdc.ssh.remote` | `user@host` for [SSH transport](ssh.md) |
 | `cdc.ssh.path` | Chunk root directory on that host |
 | `cdc.ssh.command` | Advanced: replace the whole ssh invocation |
 
-Precedence when several are set: `cdc.opendal.scheme` > `cdc.ssh.remote` >
+Precedence when several are set: `cdc.store.scheme` > `cdc.ssh.remote` >
 `cdc.url`.
 
 Service credentials are **never** git config — they come from each

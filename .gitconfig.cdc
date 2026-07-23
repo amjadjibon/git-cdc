@@ -19,15 +19,17 @@
 # 	url = http://your-server:8077
 # 	token = your-secret-token
 
-# Mode 2: serverless — CLI talks straight to any OpenDAL service (s3,
-# azblob, gcs, dropbox, b2, sftp, ftp, gdrive, swift, webdav, onedrive).
-# Credentials come from each service's own standard chain (for S3: env
-# vars, ~/.aws, IMDS), never from gitconfig. If cdc.opendal.scheme is set
-# it wins over cdc.url. `option` may repeat, one KEY=VALUE pair per line.
+# Mode 2: serverless — CLI talks straight to a remote object-storage
+# service (s3, azblob, gcs, dropbox, b2, sftp, ftp, gdrive, swift, webdav,
+# onedrive; the underlying transport is OpenDAL today, but that's an
+# implementation detail — none of these config keys name it). Credentials
+# come from each service's own standard chain (for S3: env vars, ~/.aws,
+# IMDS), never from gitconfig. If cdc.store.scheme is set it wins over
+# cdc.url. `option` may repeat, one KEY=VALUE pair per line.
 #
-# Real AWS S3 — region and enable_virtual_host_style are required; OpenDAL
-# has no built-in default for either (unlike the old cdc.s3.* flags).
-# [cdc "opendal"]
+# Real AWS S3 — region and enable_virtual_host_style are required; the
+# store has no built-in default for either (unlike the old cdc.s3.* flags).
+# [cdc "store"]
 # 	scheme = s3
 # 	option = bucket=git-cdc
 # 	option = region=us-east-1
@@ -35,7 +37,7 @@
 # 	prefix = chunks/
 #
 # MinIO / RustFS / R2 (path-style, custom endpoint):
-# [cdc "opendal"]
+# [cdc "store"]
 # 	scheme = s3
 # 	option = bucket=git-cdc
 # 	option = region=us-east-1

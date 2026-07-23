@@ -8,12 +8,12 @@ use git_cdc_server::{AppState, Backend, app};
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
 enum BackendKind {
     Disk,
-    /// Any OpenDAL service: s3, azblob, azfile, b2, dropbox, gcs, sftp,
-    /// ftp, gdrive, swift, webdav, onedrive
-    Opendal,
+    /// Any supported remote object-storage service: s3, azblob, azfile,
+    /// b2, dropbox, gcs, sftp, ftp, gdrive, swift, webdav, onedrive
+    Store,
 }
 
-/// Split a `KEY=VALUE` --opendal-option argument.
+/// Split a `KEY=VALUE` --store-option argument.
 fn parse_key_value(s: &str) -> Result<(String, String), String> {
     s.split_once('=')
         .map(|(k, v)| (k.to_string(), v.to_string()))
@@ -32,21 +32,18 @@ struct Args {
     /// Chunk store root directory (disk backend)
     #[arg(long, env = "GIT_CDC_ROOT", required_if_eq("backend", "disk"))]
     root: Option<std::path::PathBuf>,
-    /// OpenDAL service scheme (opendal backend), e.g. s3, azblob, azfile,
-    /// b2, dropbox, gcs, sftp, ftp, gdrive, swift, webdav, onedrive
-    #[arg(
-        long,
-        env = "GIT_CDC_OPENDAL_SCHEME",
-        required_if_eq("backend", "opendal")
-    )]
-    opendal_scheme: Option<String>,
-    /// Service option as KEY=VALUE (repeatable), passed to OpenDAL verbatim,
-    /// e.g. --opendal-option container=chunks --opendal-option account_name=me
-    #[arg(long = "opendal-option", value_parser = parse_key_value)]
-    opendal_options: Vec<(String, String)>,
-    /// Directory chunks live under (opendal backend)
+    /// Storage service scheme (store backend), e.g. s3, azblob, azfile, b2,
+    /// dropbox, gcs, sftp, ftp, gdrive, swift, webdav, onedrive
+    #[arg(long, env = "GIT_CDC_STORE_SCHEME", required_if_eq("backend", "store"))]
+    store_scheme: Option<String>,
+    /// Service option as KEY=VALUE (repeatable), passed to the storage
+    /// backend verbatim, e.g. --store-option container=chunks
+    /// --store-option account_name=me
+    #[arg(long = "store-option", value_parser = parse_key_value)]
+    store_options: Vec<(String, String)>,
+    /// Directory chunks live under (store backend)
     #[arg(long, default_value = "chunks/")]
-    opendal_prefix: String,
+    store_prefix: String,
     /// Static bearer token clients must present
     #[arg(long, env = "GIT_CDC_TOKEN")]
     token: String,
@@ -68,14 +65,14 @@ async fn main() -> anyhow::Result<()> {
             };
             Backend::Disk(DiskStore::new(root))
         }
-        BackendKind::Opendal => {
-            let Some(scheme) = args.opendal_scheme else {
-                bail!("--opendal-scheme is required for the opendal backend")
+        BackendKind::Store => {
+            let Some(scheme) = args.store_scheme else {
+                bail!("--store-scheme is required for the store backend")
             };
             Backend::Opendal(OpendalStore::connect(&OpendalConfig {
                 scheme,
-                options: args.opendal_options,
-                prefix: args.opendal_prefix,
+                options: args.store_options,
+                prefix: args.store_prefix,
             })?)
         }
     };
@@ -107,22 +104,22 @@ mod tests {
     }
 
     #[test]
-    fn opendal_backend_requires_scheme() {
-        assert!(Args::try_parse_from(["s", "--backend", "opendal", "--token", "t"]).is_err());
+    fn store_backend_requires_scheme() {
+        assert!(Args::try_parse_from(["s", "--backend", "store", "--token", "t"]).is_err());
         let ok = Args::try_parse_from([
             "s",
             "--backend",
-            "opendal",
-            "--opendal-scheme",
+            "store",
+            "--store-scheme",
             "fs",
-            "--opendal-option",
+            "--store-option",
             "root=/tmp/x",
             "--token",
             "t",
         ])
         .unwrap();
         assert_eq!(
-            ok.opendal_options,
+            ok.store_options,
             vec![("root".to_string(), "/tmp/x".to_string())]
         );
         // Malformed option is rejected at parse time.
@@ -130,10 +127,10 @@ mod tests {
             Args::try_parse_from([
                 "s",
                 "--backend",
-                "opendal",
-                "--opendal-scheme",
+                "store",
+                "--store-scheme",
                 "fs",
-                "--opendal-option",
+                "--store-option",
                 "no-equals",
                 "--token",
                 "t"
