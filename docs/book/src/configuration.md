@@ -51,80 +51,39 @@ git config cdc.chunk.avg 256k   # 256 B – 4 MiB
 git config cdc.chunk.max 1m     # 1 KiB – 16 MiB   (min ≤ avg ≤ max)
 
 
-### Keep `cdc.chunk.*` consistent across a team
+### `cdc.chunk.*` across a team
 
-Chunk boundaries are reproducible only for a given parameter set. A clone
-configured differently re-chunks files nobody edited: the next `git add`
-rewrites their manifests, `git status` reports them modified until it does,
-and `push` uploads a second copy of content the remote already has under
-different hashes.
+Chunk boundaries are reproducible only for a given parameter set, so a clone
+configured differently would re-chunk files nobody edited — rewriting their
+manifests on the next `git add` and uploading a second copy of content the
+remote already has under different hashes.
 
-Nothing is corrupted — reassembly goes by chunk hash, so `pull` and `checkout`
-reproduce the exact bytes whatever the local config says. What breaks is
-dedup, silently. Measured on one 8 MiB file committed at `avg 2m` and pulled
-into a clone set to `avg 1m`: 4 chunks became 8, and the remote went from 4
-objects to 11 for identical content.
+git-cdc prevents that: **a file already tracked is re-chunked with the
+parameters its committed manifest records**, not with this clone's
+`cdc.chunk.*`. A clone set to `avg 1m` pulling a repo committed at `avg 2m`
+keeps producing the 2 MiB-average manifests, so `git status` stays clean and
+`push` uploads nothing new.
 
-`git cdc pull` warns when this repo's config disagrees with what the tracked
-manifests were committed with, and prints the settings that match:
+What the local config still governs:
 
-```text
-git-cdc: warning: 1 tracked file(s) were committed with chunk parameters
-         (min/avg/max 524288/2097152/8388608) that differ from this repo's
-         config (524288/1048576/8388608).
-git-cdc: the next `git add` will re-chunk them, losing dedup against what the
-         remote already has. To match the committed settings:
-git-cdc:     git config cdc.chunk.min 524288
-git-cdc:     git config cdc.chunk.avg 2097152
-git-cdc:     git config cdc.chunk.max 8388608
-```
+- **New files.** Nothing is committed to inherit from, so they use this repo's
+  settings. That is the one way a repo ends up with mixed parameters, and
+  `git cdc pull` prints a note when it sees the mismatch, along with the
+  config that matches the rest of the repo.
+- **Everything, when you opt out.** Set `cdc.chunk.inherit false` to re-chunk
+  deliberately onto new settings:
 
-Commit these in a shared setup script (or set them `--global`) rather than
-leaving each clone to pick its own. Changing them deliberately is fine — it
-just means the next commit of each tracked file re-chunks it once.
-```
+  ```sh
+  git config cdc.chunk.inherit false
+  git config cdc.chunk.avg 1m
+  git add --renormalize .        # re-chunks every tracked file
+  ```
 
-Values are bytes; git's `k`/`m`/`g` suffixes work. Out-of-range or
-misordered values fail the clean filter with an error naming the key —
-invalid config never silently falls back to defaults.
+Inheriting reads the committed manifest through a single long-lived
+`git cat-file --batch`, so a filter run over thousands of files spawns one
+child process, not thousands. A manifest whose recorded parameters fastcdc
+would reject is ignored rather than inherited.
 
-Guidance:
-
-- **Smaller chunks** → finer dedup (small edits invalidate less), but more
-  objects: ~90 bytes of manifest per chunk, one store object and one upload
-  each. Good for files of a few MB that change often.
-- **Larger chunks** → fewer round-trips and less overhead for huge,
-  rarely-edited assets.
-- The conventional shape is `min = avg/4`, `max = avg×4`; usually you only
-  really choose `avg`.
-
-The settings apply when files are *chunked* (`git add`). Manifests record
-the values used, and readers reassemble purely by chunk hash — so changing
-the config never invalidates existing history.
-
-> **Caveat:** all clients of a repo should use the same values. Different
-> configs re-clean identical content into different (equally valid)
-> manifests, which shows up as spurious diffs. Set them repo-locally, not
-> `--global`.
-
-## Global setup with an include file
-
-The repo ships a commented sample of every setting,
-[`.gitconfig.cdc`](https://github.com/amjadjibon/git-cdc/blob/main/.gitconfig.cdc).
-Wire it into your global config with git's native include mechanism:
-
-```sh
-cp .gitconfig.cdc ~/.gitconfig.cdc
-git config --global include.path ~/.gitconfig.cdc
-```
-
-Then edit `~/.gitconfig.cdc`. The pre-push hook still needs a one-time
-`git cdc install` per repo (git hooks are per-repo).
-
-## GC grace period
-
-`git cdc gc --grace-secs <n>` (default 86400): unreferenced chunks younger
-than this survive a sweep, protecting just-cleaned but not-yet-committed
-chunks and in-flight uploads. The server has its own `--grace-secs` flag
-for server-side sweeps; in serverless mode the CLI's value applies to the
-bucket. See [Garbage Collection](gc.md).
+Nothing here affects correctness: reassembly goes by chunk hash, so `pull` and
+`checkout` reproduce exact bytes whatever the parameters were. What is at
+stake is dedup.

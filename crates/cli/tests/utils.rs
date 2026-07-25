@@ -65,7 +65,7 @@ pub fn base_setup_repo(repo: &Path) {
     cdc(repo, &["install"]);
     git(
         repo,
-        &["config", "filter.cdc.clean", &format!("{BIN} clean")],
+        &["config", "filter.cdc.clean", &format!("{BIN} clean %f")],
     );
     git(
         repo,

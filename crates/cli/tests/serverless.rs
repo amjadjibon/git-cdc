@@ -613,7 +613,9 @@ fn pull_never_stages_a_rechunked_manifest() {
     let committed = git(&repo, &["rev-parse", "HEAD:asset.bin"]);
 
     cdc(&repo, &["drop", "--chunks", "asset.bin"]);
-    // Re-chunking now would produce a different manifest than the commit.
+    // inherit=false so re-chunking really would diverge — otherwise `clean`
+    // reuses the committed parameters and there is nothing to get wrong.
+    git(&repo, &["config", "cdc.chunk.inherit", "false"]);
     git(&repo, &["config", "cdc.chunk.avg", "1048576"]);
     cdc(&repo, &["pull"]);
 
@@ -694,4 +696,97 @@ fn pull_warns_when_chunk_config_diverges() {
         git(&repo, &["rev-parse", "HEAD:asset.bin"]),
         "a diverging config must not stage a re-chunked manifest"
     );
+}
+
+/// The point of inheriting: a clone configured differently must not re-chunk
+/// a tracked file it did not edit. Without this, `git add` rewrites the
+/// manifest and `push` uploads a second copy of identical content.
+#[test]
+fn clean_inherits_committed_chunk_params() {
+    let tmp = tempfile::tempdir().unwrap();
+    let remote_root = tmp.path().join("remote-store");
+    let repo = tmp.path().join("origin");
+    pushed_repo(&repo, &remote_root, "asset.bin", 60);
+    let committed = git(&repo, &["show", "HEAD:asset.bin"]);
+    let remote_before = count_remote_objects(&remote_root);
+
+    // This clone wants 1 MiB chunks; the file was committed at the default.
+    git(&repo, &["config", "cdc.chunk.avg", "1048576"]);
+    fs::write(repo.join("notes.txt"), b"unrelated").unwrap();
+    git(&repo, &["add", "."]);
+    git(&repo, &["commit", "-q", "-m", "unrelated change"]);
+
+    assert_eq!(
+        git(&repo, &["show", "HEAD:asset.bin"]),
+        committed,
+        "a file nobody edited must keep its committed manifest verbatim"
+    );
+    cdc(&repo, &["push"]);
+    assert_eq!(
+        count_remote_objects(&remote_root),
+        remote_before,
+        "no duplicate chunks for content the remote already has"
+    );
+}
+
+/// `cdc.chunk.inherit=false` is the opt-out for deliberately re-chunking a
+/// repo onto new settings.
+#[test]
+fn chunk_inherit_false_uses_the_local_config() {
+    let tmp = tempfile::tempdir().unwrap();
+    let remote_root = tmp.path().join("remote-store");
+    let repo = tmp.path().join("origin");
+    pushed_repo(&repo, &remote_root, "asset.bin", 61);
+    let before = git(&repo, &["show", "HEAD:asset.bin"]);
+    assert!(before.contains("chunk-avg 2097152"));
+
+    git(&repo, &["config", "cdc.chunk.inherit", "false"]);
+    git(&repo, &["config", "cdc.chunk.avg", "1048576"]);
+    // Touch the file so git re-runs the clean filter on it.
+    let data = fs::read(repo.join("asset.bin")).unwrap();
+    fs::write(repo.join("asset.bin"), &data).unwrap();
+    git(&repo, &["add", "--renormalize", "."]);
+    git(&repo, &["commit", "-q", "-m", "rechunk"]);
+
+    assert!(
+        git(&repo, &["show", "HEAD:asset.bin"]).contains("chunk-avg 1048576"),
+        "opting out must honour the local config"
+    );
+}
+
+/// A brand-new file has no committed manifest to inherit from, so it uses
+/// this repo's config — the one case where divergence is unavoidable.
+#[test]
+fn new_files_use_the_local_chunk_config() {
+    let tmp = tempfile::tempdir().unwrap();
+    let remote_root = tmp.path().join("remote-store");
+    let repo = tmp.path().join("origin");
+    pushed_repo(&repo, &remote_root, "asset.bin", 62);
+
+    git(&repo, &["config", "cdc.chunk.avg", "1048576"]);
+    fs::write(repo.join("fresh.bin"), test_data(3 * 1024 * 1024, 63)).unwrap();
+    git(&repo, &["add", "."]);
+    git(&repo, &["commit", "-q", "-m", "fresh"]);
+
+    assert!(git(&repo, &["show", "HEAD:fresh.bin"]).contains("chunk-avg 1048576"));
+    assert!(git(&repo, &["show", "HEAD:asset.bin"]).contains("chunk-avg 2097152"));
+}
+
+fn count_remote_objects(remote_root: &Path) -> usize {
+    fn walk(dir: &Path, n: &mut usize) {
+        let Ok(entries) = fs::read_dir(dir) else {
+            return;
+        };
+        for e in entries.flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                walk(&p, n);
+            } else {
+                *n += 1;
+            }
+        }
+    }
+    let mut n = 0;
+    walk(remote_root, &mut n);
+    n
 }

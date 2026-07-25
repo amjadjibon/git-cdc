@@ -12,7 +12,7 @@ All commands run as `git cdc <command>` (git finds the `git-cdc` binary on
 | `git cdc gc [--dry-run] [--grace-secs N]` | Mark-and-sweep unreferenced chunks locally and remotely. See [Garbage Collection](gc.md). |
 | `git cdc drop [--chunks] [--dry-run] --all \| <path>...` | Reclaim local disk: rewrite tracked files back to their committed manifest, and with `--chunks` remove local chunks the remote already holds. Reversed by `git cdc pull`. |
 | `git cdc diff <a> <b>` | Compare two manifest files: added/removed chunks and byte counts. |
-| `git cdc clean` / `git cdc smudge` | The filter endpoints (hidden; invoked by git, not by hand). |
+| `git cdc clean [<path>]` / `git cdc smudge` | The filter endpoints (hidden; invoked by git, not by hand). `clean` takes git's `%f` so a tracked file keeps the chunk parameters it was committed with. |
 
 ## Reclaiming local disk with `drop`
 

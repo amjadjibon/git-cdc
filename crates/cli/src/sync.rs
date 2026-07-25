@@ -370,16 +370,28 @@ fn warn_chunk_param_mismatch(tracked: &[(String, git_cdc_core::manifest::Manifes
     if (min, avg, max) == (local.min, local.avg, local.max) {
         return;
     }
+    let inherit = git_out(&["config", "--type=bool", "--get", "cdc.chunk.inherit"])
+        .map(|v| v != "false")
+        .unwrap_or(true);
     eprintln!(
-        "git-cdc: warning: {n} tracked file(s) were committed with chunk parameters \
+        "git-cdc: note: {n} tracked file(s) were committed with chunk parameters \
          (min/avg/max {min}/{avg}/{max}) that differ from this repo's config \
          ({}/{}/{}).",
         local.min, local.avg, local.max
     );
-    eprintln!(
-        "git-cdc: the next `git add` will re-chunk them, losing dedup against \
-         what the remote already has. To match the committed settings:"
-    );
+    if inherit {
+        eprintln!(
+            "git-cdc: those files keep their committed parameters, but new files \
+             added here will use this repo's config — a mix that costs dedup. \
+             To match the rest of the repo:"
+        );
+    } else {
+        eprintln!(
+            "git-cdc: cdc.chunk.inherit is false, so the next `git add` will \
+             re-chunk them too, losing dedup against what the remote already \
+             has. To match the committed settings:"
+        );
+    }
     eprintln!("git-cdc:     git config cdc.chunk.min {min}");
     eprintln!("git-cdc:     git config cdc.chunk.avg {avg}");
     eprintln!("git-cdc:     git config cdc.chunk.max {max}");
