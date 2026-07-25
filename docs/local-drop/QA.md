@@ -57,13 +57,38 @@ Manually exercised the release binary end to end in a scratch repo (track →
 commit → push → `drop --chunks` → `pull`), confirming the `git status`
 behaviour outside the test harness, where timing differs.
 
-## Pre-existing issue found, not fixed
+## Pre-existing issue found and fixed
 
-`git cdc pull` leaves materialized files reading as modified in `git status`:
-git's stat cache recorded the manifest's size, and nothing re-checks the
-content. Verified that `git update-index --refresh`, `--really-refresh`, and
-`--again` are all stat-only and do **not** settle it; only `git add` does,
-which would re-chunk every file just pulled. Pre-existing (a fresh clone's
-`pull` hits the same path — not introduced by `drop`), so it is left with a
-`ponytail:` note in `cmd_pull` rather than fixed here. See the deviation note
-in PLAN.md §2.
+`git cdc pull` left materialized files reading as modified in `git status`:
+git's stat cache recorded the manifest's size, and nothing re-checked the
+content. Pre-existing — a fresh clone's `pull` hits the same path — but it made
+the documented `drop` → `pull` round trip look broken, so it is fixed here.
+
+The first review left it open on a cost argument that measurement disproved:
+`git add` on a 34 MB file costs 0.106s against pull's own 0.262s (~40%, not the
+assumed doubling — the chunks already exist, so the store writes short-circuit).
+
+`git add` is still the wrong mechanism, for a different reason: it re-chunks
+with the *current* `cdc.chunk.*` config, and with `cdc.chunk.avg` changed since
+the commit it silently staged a different manifest (blob `d5601509` against
+HEAD's `f0fc41d4`) — verified.
+
+`settle_index` instead rewrites each entry with `git update-index --cacheinfo`
+(same mode and blob, which zeroes the recorded size — git's own signal that the
+content must be compared for real) and then `--refresh`. Stat-only, so it can
+never stage anything:
+
+| Scenario | Result |
+|----------|--------|
+| chunk params unchanged | status clean, index blob unchanged |
+| chunk params changed | stays honestly ` M` unstaged, index blob unchanged |
+
+Cost 0.118s on the 34 MB file (+45% of pull). A genuinely divergent file keeps
+a zeroed size, so later `git status` runs re-check it — unavoidable, since its
+content really does differ from the index.
+
+| Test | Pins |
+|------|------|
+| `drop_reclaims_worktree_and_chunks` | post-`pull` `git status` is now clean |
+| `pull_never_stages_a_rechunked_manifest` | changed chunk params never stage a re-chunked manifest — fails if swapped for `git add` |
+| `pull_preserves_the_file_mode` | an executable file stays 100755 — fails if the mode is hardcoded |

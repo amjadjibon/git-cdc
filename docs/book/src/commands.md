@@ -7,7 +7,7 @@ All commands run as `git cdc <command>` (git finds the `git-cdc` binary on
 | ------- | ------------ |
 | `git cdc install [--global]` | Register the clean/smudge filter driver; repo-local installs also get a pre-push hook running `git cdc push`. Never overwrites an existing hook. |
 | `git cdc track <pattern>...` | Append `<pattern> filter=cdc -text` lines to `.gitattributes` (idempotent). |
-| `git cdc pull` | Fetch chunks missing for the current checkout, then materialize tracked files whose worktree still holds manifest text. Verifies every chunk hash and each file's oid. |
+| `git cdc pull` | Fetch chunks missing for the current checkout, then materialize tracked files whose worktree still holds manifest text. Verifies every chunk hash and each file's oid, and settles git's stat cache so rehydrated files are not reported as modified. |
 | `git cdc push` | Collect every chunk referenced by any manifest in history, negotiate with the remote, upload only what's missing. Run automatically by the pre-push hook. |
 | `git cdc gc [--dry-run] [--grace-secs N]` | Mark-and-sweep unreferenced chunks locally and remotely. See [Garbage Collection](gc.md). |
 | `git cdc drop [--chunks] [--dry-run] --all \| <path>...` | Reclaim local disk: rewrite tracked files back to their committed manifest, and with `--chunks` remove local chunks the remote already holds. Reversed by `git cdc pull`. |

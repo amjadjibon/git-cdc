@@ -315,7 +315,7 @@ pub fn cmd_pull() -> Result<()> {
     }
 
     // Materialize worktree files still in passed-through-manifest state.
-    let mut materialized = 0usize;
+    let mut materialized: Vec<&str> = Vec::new();
     for (path, m) in &tracked {
         let abs = root.join(path);
         let worktree = fs::read(&abs).unwrap_or_default();
@@ -333,16 +333,74 @@ pub fn cmd_pull() -> Result<()> {
             bail!("{path}: reassembled content does not match manifest oid");
         }
         fs::write(&abs, out)?;
-        materialized += 1;
+        materialized.push(path);
     }
-    // ponytail: materialized files read as modified in `git status` until
-    // something re-runs the clean filter — git's stat cache recorded the
-    // manifest's size, not the content's, and neither `update-index
-    // --refresh` nor `--really-refresh` re-checks content (both stat-only).
-    // Only `git add` settles it, and that re-chunks every file just pulled,
-    // so it is deliberately not done here. Pre-existing since fresh clones
-    // hit the same path; fix it when the re-chunk cost is worth paying.
-    eprintln!("git-cdc: materialized {materialized} files");
+    settle_index(&root, &materialized)?;
+    eprintln!("git-cdc: materialized {} files", materialized.len());
+    Ok(())
+}
+
+/// Make `git status` agree that just-materialized files are unmodified.
+///
+/// Growing a file from its manifest to its content leaves git's stat cache
+/// holding the manifest's size, and git reports the mismatch as an unstaged
+/// modification without ever re-running the clean filter. `--refresh` alone
+/// cannot fix it — it, `--really-refresh`, and `--again` are all stat-only.
+///
+/// So: rewrite each entry with `--cacheinfo` (same mode and blob, which zeroes
+/// the recorded size), then `--refresh`. A zero size is git's own signal that
+/// stat data was never read and the content must be compared for real, which
+/// runs the clean filter and settles the entry properly.
+///
+/// Deliberately not `git add`: that re-chunks with the *current* `cdc.chunk.*`
+/// config and silently stages a different manifest when those changed since
+/// the commit. `--cacheinfo` + `--refresh` can only ever update stat data, so
+/// a genuinely divergent file stays honestly unstaged-modified instead.
+///
+/// ponytail: costs one clean-filter pass over what was just pulled (measured
+/// +45% on a 34 MB file: 0.118s on top of pull's 0.262s). A file that does
+/// diverge keeps a zeroed size, so every later `git status` re-checks it —
+/// unavoidable, since its content really does differ from the index.
+fn settle_index(root: &std::path::Path, paths: &[&str]) -> Result<()> {
+    if paths.is_empty() {
+        return Ok(());
+    }
+    let root = root.to_string_lossy().into_owned();
+    // Mode matters: an executable tracked file must not come back as 100644.
+    let listed = git_out(&[
+        "-c",
+        crate::git::QUOTE_PATH,
+        "-C",
+        &root,
+        "ls-files",
+        "-s",
+        "--",
+    ])?;
+    let mut args: Vec<String> = vec!["-C".into(), root, "update-index".into()];
+    for line in listed.lines() {
+        // "<mode> <blob> <stage>\t<path>"
+        let Some((meta, path)) = line.split_once('\t') else {
+            continue;
+        };
+        if !paths.contains(&path) {
+            continue;
+        }
+        let mut fields = meta.split_whitespace();
+        let (Some(mode), Some(blob)) = (fields.next(), fields.next()) else {
+            continue;
+        };
+        args.push("--cacheinfo".into());
+        args.push(format!("{mode},{blob},{path}"));
+    }
+    if args.len() == 3 {
+        return Ok(()); // nothing resolvable — leave the index alone
+    }
+    git_out(&args.iter().map(String::as_str).collect::<Vec<_>>())?;
+    // Advisory: exits non-zero listing entries it could not settle (a file
+    // that genuinely differs from its manifest), which is not our failure.
+    let _ = std::process::Command::new("git")
+        .args(["-C", &args[1], "update-index", "--refresh"])
+        .output();
     Ok(())
 }
 

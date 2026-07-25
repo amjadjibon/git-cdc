@@ -320,14 +320,15 @@ fn drop_reclaims_worktree_and_chunks() {
         data,
         "pull restores byte-identical content"
     );
-    // Not asserting a clean status here: `pull` leaves git's stat cache
-    // recording the manifest's size, so the file reads as modified until
-    // something re-runs the clean filter. Pre-existing (a fresh clone's pull
-    // does the same) and untouched by `drop` — see the note in cmd_pull.
     assert_eq!(
         git(&repo, &["rev-parse", ":asset.bin"]),
         git(&repo, &["rev-parse", "HEAD:asset.bin"]),
         "pull stages nothing — the blob is unchanged"
+    );
+    assert_eq!(
+        git(&repo, &["status", "--porcelain"]).trim(),
+        "",
+        "pull settles the stat cache — a rehydrated file is not 'modified'"
     );
 }
 
@@ -597,4 +598,57 @@ fn drop_keeps_chunks_shared_with_a_skipped_file() {
     );
     git(&repo, &["checkout", "-q", "--", "copy.bin"]);
     assert_eq!(fs::read(repo.join("copy.bin")).unwrap(), data);
+}
+
+/// `pull` settles git's stat cache by stat-only means, so it can never stage
+/// a re-chunked manifest. If `cdc.chunk.*` changed since the commit the file
+/// genuinely diverges — it must stay honestly unstaged-modified, never
+/// silently staged.
+#[test]
+fn pull_never_stages_a_rechunked_manifest() {
+    let tmp = tempfile::tempdir().unwrap();
+    let remote_root = tmp.path().join("remote-store");
+    let repo = tmp.path().join("origin");
+    pushed_repo(&repo, &remote_root, "asset.bin", 57);
+    let committed = git(&repo, &["rev-parse", "HEAD:asset.bin"]);
+
+    cdc(&repo, &["drop", "--chunks", "asset.bin"]);
+    // Re-chunking now would produce a different manifest than the commit.
+    git(&repo, &["config", "cdc.chunk.avg", "1048576"]);
+    cdc(&repo, &["pull"]);
+
+    assert_eq!(
+        git(&repo, &["rev-parse", ":asset.bin"]),
+        committed,
+        "the index blob must still be the committed manifest"
+    );
+}
+
+/// An executable tracked file must not come back as mode 100644 after pull
+/// rewrites its index entry.
+#[test]
+fn pull_preserves_the_file_mode() {
+    let tmp = tempfile::tempdir().unwrap();
+    let remote_root = tmp.path().join("remote-store");
+    let repo = tmp.path().join("origin");
+    pushed_repo(&repo, &remote_root, "asset.bin", 58);
+    // Both halves: the file on disk and the index entry. `--chmod=+x` alone
+    // would leave the worktree at 0644 and the repo dirty before pull runs.
+    let exe = repo.join("asset.bin");
+    let mut perms = fs::metadata(&exe).unwrap().permissions();
+    std::os::unix::fs::PermissionsExt::set_mode(&mut perms, 0o755);
+    fs::set_permissions(&exe, perms).unwrap();
+    git(&repo, &["update-index", "--chmod=+x", "asset.bin"]);
+    git(&repo, &["commit", "-q", "-m", "chmod"]);
+    assert!(git(&repo, &["ls-files", "-s", "asset.bin"]).starts_with("100755"));
+    assert_eq!(git(&repo, &["status", "--porcelain"]).trim(), "");
+
+    cdc(&repo, &["drop", "--chunks", "asset.bin"]);
+    cdc(&repo, &["pull"]);
+
+    assert!(
+        git(&repo, &["ls-files", "-s", "asset.bin"]).starts_with("100755"),
+        "pull must not downgrade an executable file's mode"
+    );
+    assert_eq!(git(&repo, &["status", "--porcelain"]).trim(), "");
 }
