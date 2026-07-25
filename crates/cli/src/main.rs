@@ -57,6 +57,21 @@ enum Cmd {
         #[arg(long, default_value_t = 24 * 3600)]
         grace_secs: u64,
     },
+    /// Reclaim local disk: rewrite tracked files back to their committed
+    /// manifest, and with --chunks drop local chunks the remote already has.
+    /// `git cdc pull` rehydrates. Files with uncommitted changes are skipped.
+    Drop {
+        paths: Vec<String>,
+        /// Every tracked file in the index
+        #[arg(long)]
+        all: bool,
+        /// Also remove the files' chunks from the local store (requires a
+        /// remote: a chunk is only safe to delete once the remote has it)
+        #[arg(long)]
+        chunks: bool,
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Diff two manifest files (added/removed chunks and bytes); with no
     /// arguments, diff every tracked file between HEAD and the index
     Diff {
@@ -79,6 +94,12 @@ fn main() -> Result<()> {
             dry_run,
             grace_secs,
         } => sync::cmd_gc(dry_run, grace_secs),
+        Cmd::Drop {
+            paths,
+            all,
+            chunks,
+            dry_run,
+        } => sync::cmd_drop(&paths, all, chunks, dry_run),
         Cmd::Diff { from, to } => match (from, to) {
             (Some(from), Some(to)) => cmd_diff(&from, &to),
             (None, None) => cmd_diff_repo(),

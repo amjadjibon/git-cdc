@@ -241,7 +241,31 @@ write and read, and reassembled files are checked against the whole-file oid.
 | `git cdc push` | Upload chunks referenced by any local manifest (only ones the server is missing) |
 | `git cdc pull` | Fetch missing chunks for the current checkout and materialize files |
 | `git cdc gc [--dry-run] [--grace-secs N]` | Mark-and-sweep unreferenced chunks, locally and on the server |
+| `git cdc drop [--chunks] [--dry-run] --all \| <path>…` | Reclaim local disk: collapse tracked files back to their manifest, optionally dropping local chunks the remote already has |
 | `git cdc diff <a> <b>` | Chunk-level changelist between two manifest files |
+
+### Reclaiming local disk
+
+A tracked file costs local disk twice — the hydrated file in your
+worktree *plus* its chunks in `.git/cdc/objects`. `git cdc drop` gives
+both back:
+
+```sh
+git cdc drop --chunks huge-dataset.bin   # one file
+git cdc drop --chunks --all              # every tracked file
+git cdc pull                             # …and back again
+```
+
+The file becomes its manifest — the same state a fresh clone is in — so
+git still sees a clean worktree and the content is one `git cdc pull`
+away. Two things it will not do: delete a chunk the remote does not
+have (that would be unrecoverable, so `--chunks` needs a remote), and
+touch a file with uncommitted changes (those were never chunked, so they
+exist nowhere else) — those files are skipped and named.
+
+This is the opposite of [`gc`](docs/book/src/gc.md), which sweeps chunks
+nothing references any more; `drop` deletes chunks that *are* referenced,
+on purpose, because the remote can serve them again.
 
 ## Layout
 

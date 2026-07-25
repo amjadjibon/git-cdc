@@ -129,16 +129,23 @@ pub fn all_manifests() -> Result<Vec<Manifest>> {
 }
 
 /// Tracked (filter=cdc) paths in the index, with their staged manifests.
+///
+/// Every git call runs from the repo root, so the paths returned are always
+/// repo-relative. Run from a subdirectory, a bare `ls-files` would list only
+/// that subtree and name it relative to the cwd, which callers then join onto
+/// `repo_root()` — silently wrong.
 pub fn index_manifests() -> Result<Vec<(String, Manifest)>> {
-    let files = git_out(&["ls-files"])?;
+    let root = repo_root()?;
+    let root = root.to_string_lossy().into_owned();
+    let files = git_out(&["-C", &root, "ls-files"])?;
     let mut out = Vec::new();
     for path in files.lines() {
-        let attr = git_out(&["check-attr", "filter", "--", path])?;
+        let attr = git_out(&["-C", &root, "check-attr", "filter", "--", path])?;
         if !attr.ends_with(": filter: cdc") {
             continue;
         }
         let blob = Git::new("git")
-            .args(["show", &format!(":{path}")])
+            .args(["-C", &root, "show", &format!(":{path}")])
             .output()?;
         if !blob.status.success() {
             continue;
