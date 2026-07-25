@@ -1184,7 +1184,7 @@ dependencies = [
 
 [[package]]
 name = "git-cdc-cli"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "axum",
@@ -1198,7 +1198,7 @@ dependencies = [
 
 [[package]]
 name = "git-cdc-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "blake3",
@@ -1215,7 +1215,7 @@ dependencies = [
 
 [[package]]
 name = "git-cdc-server"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "axum",
