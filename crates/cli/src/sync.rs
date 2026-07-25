@@ -499,7 +499,10 @@ pub fn cmd_drop(paths: &[String], all: bool, chunks: bool, dry_run: bool) -> Res
     };
 
     let (mut dropped, mut skipped, mut modified, mut freed) = (0usize, 0usize, 0usize, 0u64);
+    // Chunks a dropped file no longer needs locally, minus any a skipped
+    // file still does — dedup means one chunk can belong to both.
     let mut reclaimable: HashSet<blake3::Hash> = HashSet::new();
+    let mut pinned: HashSet<blake3::Hash> = HashSet::new();
     for (path, m) in &selected {
         let abs = root.join(path);
         let Ok(content) = fs::read(&abs) else {
@@ -521,6 +524,10 @@ pub fn cmd_drop(paths: &[String], all: bool, chunks: bool, dry_run: bool) -> Res
             eprintln!(
                 "git-cdc: {path}: worktree content does not match the committed manifest (uncommitted changes?) — skipped"
             );
+            // Its committed chunks stay local even if a sibling file shares
+            // them, so `git checkout -- <path>` can still restore it without
+            // reaching for the network.
+            pinned.extend(m.chunks.iter().map(|c| c.hash));
             skipped += 1;
             modified += 1;
             continue;
@@ -557,7 +564,10 @@ pub fn cmd_drop(paths: &[String], all: bool, chunks: bool, dry_run: bool) -> Res
     // a file skipped for uncommitted edits keeps its chunks, so a later
     // `git checkout` of it still restores content from the local store.
     let (mut removed, mut chunk_bytes) = (0usize, 0u64);
-    for hash in removable.intersection(&reclaimable) {
+    for hash in removable
+        .intersection(&reclaimable)
+        .filter(|h| !pinned.contains(*h))
+    {
         if !dry_run {
             store.remove(hash)?;
         }

@@ -570,3 +570,31 @@ fn drop_chunks_reaches_an_already_dropped_file() {
     cdc(&repo, &["pull"]);
     assert_eq!(fs::read(repo.join("asset.bin")).unwrap(), data);
 }
+
+/// Dedup means one chunk can belong to both a dropped file and a skipped one.
+/// Identical content makes every chunk shared, so nothing may be reclaimed
+/// while the skipped file still needs it locally.
+#[test]
+fn drop_keeps_chunks_shared_with_a_skipped_file() {
+    let tmp = tempfile::tempdir().unwrap();
+    let remote_root = tmp.path().join("remote-store");
+    let repo = tmp.path().join("origin");
+    let data = pushed_repo(&repo, &remote_root, "clean.bin", 56);
+    // Byte-identical copy: the two files share every chunk.
+    fs::write(repo.join("copy.bin"), &data).unwrap();
+    git(&repo, &["add", "."]);
+    git(&repo, &["commit", "-q", "-m", "copy"]);
+    cdc(&repo, &["push"]);
+    let before = local_chunks(&repo);
+
+    fs::write(repo.join("copy.bin"), b"uncommitted").unwrap();
+    cdc(&repo, &["drop", "--chunks", "--all"]);
+
+    assert_eq!(
+        local_chunks(&repo),
+        before,
+        "every chunk is shared with the skipped file, so none may be swept"
+    );
+    git(&repo, &["checkout", "-q", "--", "copy.bin"]);
+    assert_eq!(fs::read(repo.join("copy.bin")).unwrap(), data);
+}
