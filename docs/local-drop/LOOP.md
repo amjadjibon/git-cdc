@@ -26,7 +26,7 @@ last_review_base: '81602bb'
 
 | Phase | Branch | PR URL | Base | Status |
 |-------|--------|--------|------|--------|
-| 1     | local-drop | — | main | pending |
+| 1     | local-drop | https://github.com/amjadjibon/git-cdc/pull/10 | main | open |
 
 ## Active Worktrees
 
