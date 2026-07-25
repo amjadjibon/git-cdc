@@ -55,8 +55,10 @@ git config cdc.store.option "root=$remote"
 git config cdc.store.prefix chunks/
 "$BIN" track '*.bin'
 
-# A couple MiB so it actually chunks into several objects.
-head -c 4194304 /dev/urandom >asset.bin
+# 16 MiB against the default 8 MiB max chunk size: guarantees at least two
+# chunks by arithmetic, not by luck. A smaller file can legitimately come out
+# as a single chunk, since boundaries are content-defined.
+head -c 16777216 /dev/urandom >asset.bin
 # Kept outside the repo: an untracked file in it would show up in the
 # `git status` check below.
 cp asset.bin "$scratch/asset.bin.orig"
@@ -69,7 +71,7 @@ git commit -q -m "smoke: add asset"
 
 chunks_before="$(find .git/cdc/objects -type f | wc -l | tr -d ' ')"
 if [ "$chunks_before" -lt 2 ]; then
-	echo "FAIL: expected several local chunks before drop, found $chunks_before" >&2
+	echo "FAIL: expected at least 2 local chunks before drop, found $chunks_before" >&2
 	exit 1
 fi
 

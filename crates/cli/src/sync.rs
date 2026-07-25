@@ -337,7 +337,52 @@ pub fn cmd_pull() -> Result<()> {
     }
     settle_index(&root, &materialized)?;
     eprintln!("git-cdc: materialized {} files", materialized.len());
+    // After the count, so the actionable advice is the last thing on screen.
+    warn_chunk_param_mismatch(&tracked);
     Ok(())
+}
+
+/// Warn when this repo's `cdc.chunk.*` disagrees with the parameters the
+/// tracked manifests were committed with, and name the config that matches.
+///
+/// Chunk boundaries are reproducible only for a given parameter set, so a
+/// clone configured differently re-chunks files nobody edited: the next
+/// `git add` rewrites their manifests, `git status` reports them modified
+/// until it does, and `push` uploads a second copy of content the remote
+/// already has under different hashes. Nothing is corrupted — reassembly goes
+/// by chunk hash, so content stays byte-identical — but the dedup the whole
+/// design exists for quietly stops working.
+fn warn_chunk_param_mismatch(tracked: &[(String, git_cdc_core::manifest::Manifest)]) {
+    let Ok(local) = crate::git::chunk_params() else {
+        return; // a broken config is `clean`'s error to report, not ours
+    };
+    let mut counts: HashMap<(u32, u32, u32), usize> = HashMap::new();
+    for (_, m) in tracked {
+        *counts
+            .entry((m.chunk_min, m.chunk_avg, m.chunk_max))
+            .or_default() += 1;
+    }
+    // The prevailing committed set — mixed histories are possible, and the
+    // majority is the one worth matching.
+    let Some((&(min, avg, max), n)) = counts.iter().max_by_key(|(_, n)| **n) else {
+        return;
+    };
+    if (min, avg, max) == (local.min, local.avg, local.max) {
+        return;
+    }
+    eprintln!(
+        "git-cdc: warning: {n} tracked file(s) were committed with chunk parameters \
+         (min/avg/max {min}/{avg}/{max}) that differ from this repo's config \
+         ({}/{}/{}).",
+        local.min, local.avg, local.max
+    );
+    eprintln!(
+        "git-cdc: the next `git add` will re-chunk them, losing dedup against \
+         what the remote already has. To match the committed settings:"
+    );
+    eprintln!("git-cdc:     git config cdc.chunk.min {min}");
+    eprintln!("git-cdc:     git config cdc.chunk.avg {avg}");
+    eprintln!("git-cdc:     git config cdc.chunk.max {max}");
 }
 
 /// Make `git status` agree that just-materialized files are unmodified.

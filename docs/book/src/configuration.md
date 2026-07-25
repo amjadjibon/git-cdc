@@ -49,6 +49,39 @@ FastCDC bounds are configurable per repo (defaults 512 KiB / 2 MiB /
 git config cdc.chunk.min 64k    # 64 B – 1 MiB
 git config cdc.chunk.avg 256k   # 256 B – 4 MiB
 git config cdc.chunk.max 1m     # 1 KiB – 16 MiB   (min ≤ avg ≤ max)
+
+
+### Keep `cdc.chunk.*` consistent across a team
+
+Chunk boundaries are reproducible only for a given parameter set. A clone
+configured differently re-chunks files nobody edited: the next `git add`
+rewrites their manifests, `git status` reports them modified until it does,
+and `push` uploads a second copy of content the remote already has under
+different hashes.
+
+Nothing is corrupted — reassembly goes by chunk hash, so `pull` and `checkout`
+reproduce the exact bytes whatever the local config says. What breaks is
+dedup, silently. Measured on one 8 MiB file committed at `avg 2m` and pulled
+into a clone set to `avg 1m`: 4 chunks became 8, and the remote went from 4
+objects to 11 for identical content.
+
+`git cdc pull` warns when this repo's config disagrees with what the tracked
+manifests were committed with, and prints the settings that match:
+
+```text
+git-cdc: warning: 1 tracked file(s) were committed with chunk parameters
+         (min/avg/max 524288/2097152/8388608) that differ from this repo's
+         config (524288/1048576/8388608).
+git-cdc: the next `git add` will re-chunk them, losing dedup against what the
+         remote already has. To match the committed settings:
+git-cdc:     git config cdc.chunk.min 524288
+git-cdc:     git config cdc.chunk.avg 2097152
+git-cdc:     git config cdc.chunk.max 8388608
+```
+
+Commit these in a shared setup script (or set them `--global`) rather than
+leaving each clone to pick its own. Changing them deliberately is fine — it
+just means the next commit of each tracked file re-chunks it once.
 ```
 
 Values are bytes; git's `k`/`m`/`g` suffixes work. Out-of-range or

@@ -652,3 +652,46 @@ fn pull_preserves_the_file_mode() {
     );
     assert_eq!(git(&repo, &["status", "--porcelain"]).trim(), "");
 }
+
+/// Chunk boundaries are reproducible only for a given parameter set, so a
+/// clone configured differently re-chunks files nobody edited — silently
+/// losing dedup. `pull` must say so and name the config that matches.
+#[test]
+fn pull_warns_when_chunk_config_diverges() {
+    let tmp = tempfile::tempdir().unwrap();
+    let remote_root = tmp.path().join("remote-store");
+    let repo = tmp.path().join("origin");
+    pushed_repo(&repo, &remote_root, "asset.bin", 59);
+    let committed_avg = git(&repo, &["show", "HEAD:asset.bin"])
+        .lines()
+        .find_map(|l| l.strip_prefix("chunk-avg ").map(str::to_string))
+        .expect("manifest records chunk-avg");
+
+    // Matching config (the default): no warning.
+    cdc(&repo, &["drop", "--chunks", "--all"]);
+    let quiet = cdc(&repo, &["pull"]);
+    assert!(
+        !quiet.contains("chunk parameters"),
+        "must not warn when the config matches: {quiet}"
+    );
+
+    // Diverging config: warn, and name the committed values to restore.
+    cdc(&repo, &["drop", "--chunks", "--all"]);
+    git(&repo, &["config", "cdc.chunk.avg", "1048576"]);
+    let loud = cdc(&repo, &["pull"]);
+    assert!(
+        loud.contains("chunk parameters"),
+        "diverging config must warn: {loud}"
+    );
+    assert!(
+        loud.contains(&format!("git config cdc.chunk.avg {committed_avg}")),
+        "warning must name the committed avg ({committed_avg}): {loud}"
+    );
+
+    // Content is never at risk either way — reassembly goes by chunk hash.
+    assert_eq!(
+        git(&repo, &["rev-parse", ":asset.bin"]),
+        git(&repo, &["rev-parse", "HEAD:asset.bin"]),
+        "a diverging config must not stage a re-chunked manifest"
+    );
+}
