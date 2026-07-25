@@ -29,9 +29,11 @@ enum Cmd {
     },
     /// Add file patterns to .gitattributes
     Track { patterns: Vec<String> },
-    /// Clean filter: file content on stdin -> manifest on stdout
+    /// Clean filter: file content on stdin -> manifest on stdout.
+    /// The path (git's `%f`) lets a tracked file keep the chunk parameters
+    /// it was committed with; omitting it falls back to `cdc.chunk.*`.
     #[command(hide = true)]
-    Clean,
+    Clean { path: Option<String> },
     /// Smudge filter: manifest on stdin -> file content on stdout
     #[command(hide = true)]
     Smudge,
@@ -57,6 +59,21 @@ enum Cmd {
         #[arg(long, default_value_t = 24 * 3600)]
         grace_secs: u64,
     },
+    /// Reclaim local disk: rewrite tracked files back to their committed
+    /// manifest, and with --chunks drop local chunks the remote already has.
+    /// `git cdc pull` rehydrates. Files with uncommitted changes are skipped.
+    Drop {
+        paths: Vec<String>,
+        /// Every tracked file in the index
+        #[arg(long)]
+        all: bool,
+        /// Also remove the files' chunks from the local store (requires a
+        /// remote: a chunk is only safe to delete once the remote has it)
+        #[arg(long)]
+        chunks: bool,
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Diff two manifest files (added/removed chunks and bytes); with no
     /// arguments, diff every tracked file between HEAD and the index
     Diff {
@@ -69,7 +86,7 @@ fn main() -> Result<()> {
     match Cli::parse().command {
         Cmd::Install { global } => cmd_install(global),
         Cmd::Track { patterns } => cmd_track(&patterns),
-        Cmd::Clean => filter::cmd_clean(),
+        Cmd::Clean { path } => filter::cmd_clean(path.as_deref()),
         Cmd::Smudge => filter::cmd_smudge(),
         Cmd::FilterProcess => filter::cmd_filter_process(),
         Cmd::Stdio { root } => remote::cmd_stdio(&root),
@@ -79,6 +96,12 @@ fn main() -> Result<()> {
             dry_run,
             grace_secs,
         } => sync::cmd_gc(dry_run, grace_secs),
+        Cmd::Drop {
+            paths,
+            all,
+            chunks,
+            dry_run,
+        } => sync::cmd_drop(&paths, all, chunks, dry_run),
         Cmd::Diff { from, to } => match (from, to) {
             (Some(from), Some(to)) => cmd_diff(&from, &to),
             (None, None) => cmd_diff_repo(),
@@ -95,7 +118,7 @@ fn cmd_install(global: bool) -> Result<()> {
         // git ≥ 2.11 uses the long-running process; clean/smudge are the
         // documented fallback for older git and stay registered.
         ("filter.cdc.process", "git-cdc filter-process"),
-        ("filter.cdc.clean", "git-cdc clean"),
+        ("filter.cdc.clean", "git-cdc clean %f"),
         ("filter.cdc.smudge", "git-cdc smudge"),
         // filter.cdc.required deliberately NOT set: smudge passes manifests
         // through when chunks are missing so fresh clones succeed (PLAN 4.3).

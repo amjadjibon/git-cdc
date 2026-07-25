@@ -9,7 +9,7 @@ use git_cdc_core::manifest::is_manifest;
 use git_cdc_core::protocol::{ObjectSpec, Operation};
 use git_cdc_core::store::ChunkStore;
 
-use crate::git::{all_manifests, index_manifests, local_store, oid_str, repo_root};
+use crate::git::{all_manifests, git_out, index_manifests, local_store, oid_str, repo_root};
 use crate::remote::{Remote, remote};
 
 /// Chunks the local store has but a remote (identified by its own listing)
@@ -23,6 +23,97 @@ fn pending_uploads(
         .filter(|h| !present.contains(*h))
         .copied()
         .collect()
+}
+
+/// Which of `chunks` the configured remote already holds — the safety gate
+/// for `drop --chunks`: a chunk the remote has is refetchable by `git cdc
+/// pull`, so deleting the local copy is reversible no matter which other
+/// files or commits share it. Unlike `cmd_gc`, a missing remote is an error
+/// here, not a skipped step.
+fn remote_present(chunks: &HashMap<blake3::Hash, u64>) -> Result<HashSet<blake3::Hash>> {
+    if chunks.is_empty() {
+        return Ok(HashSet::new());
+    }
+    // The serverless remotes answer with one listing, same as `cmd_push`.
+    let intersect = |present: HashSet<blake3::Hash>| -> HashSet<blake3::Hash> {
+        present
+            .into_iter()
+            .filter(|h| chunks.contains_key(h))
+            .collect()
+    };
+    Ok(match remote()? {
+        Remote::Http(client) => {
+            let objects: Vec<ObjectSpec> = chunks
+                .iter()
+                .map(|(h, size)| ObjectSpec {
+                    oid: oid_str(h),
+                    size: *size,
+                })
+                .collect();
+            let resp = client.batch(Operation::Download, objects)?;
+            let mut present = HashSet::new();
+            for obj in &resp.objects {
+                // An error or a missing download action both mean "not there".
+                if obj.error.is_some()
+                    || obj
+                        .actions
+                        .as_ref()
+                        .and_then(|a| a.download.as_ref())
+                        .is_none()
+                {
+                    continue;
+                }
+                present.insert(git_cdc_core::manifest::parse_hash(&obj.oid)?);
+            }
+            present
+        }
+        Remote::Opendal { store, rt } => rt.block_on(async {
+            anyhow::Ok(intersect(
+                store.list().await?.into_iter().map(|(h, _)| h).collect(),
+            ))
+        })?,
+        Remote::Ssh(mut ssh) => intersect(ssh.list()?.into_iter().map(|(h, _)| h).collect()),
+    })
+}
+
+/// Tracked paths named by `args`, resolved through `git ls-files
+/// --full-name` so a cwd-relative path (or a glob) from a subdirectory
+/// matches the repo-relative paths `index_manifests` returns.
+fn resolve_paths(
+    args: &[String],
+    tracked: &[(String, git_cdc_core::manifest::Manifest)],
+) -> Result<Vec<usize>> {
+    let mut out = Vec::new();
+    for arg in args {
+        let listed = git_out(&[
+            "-c",
+            crate::git::QUOTE_PATH,
+            "ls-files",
+            "--full-name",
+            "--",
+            arg,
+        ])?;
+        let hits: Vec<&str> = listed
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .collect();
+        if hits.is_empty() {
+            bail!("{arg}: no such file tracked by git");
+        }
+        for hit in hits {
+            let i = tracked
+                .iter()
+                .position(|(p, _)| p == hit)
+                .with_context(|| {
+                    format!("{hit} is not a git-cdc file (no filter=cdc manifest in the index)")
+                })?;
+            if !out.contains(&i) {
+                out.push(i);
+            }
+        }
+    }
+    Ok(out)
 }
 
 /// What a GC sweep should do with one chunk: shared mark-and-sweep + grace
@@ -84,7 +175,7 @@ pub fn cmd_push() -> Result<()> {
                 let hash = git_cdc_core::manifest::parse_hash(&obj.oid)?;
                 if !store.has(&hash) {
                     bail!(
-                        "server wants {} but it is not in the local store — run `git cdc pull` first",
+                        "server wants {} but it is not in the local store — run `git cdc pull` first (a dropped chunk from `git cdc drop --chunks` needs refetching)",
                         obj.oid
                     );
                 }
@@ -124,7 +215,7 @@ pub fn cmd_push() -> Result<()> {
             let pending = pending_uploads(&chunks, &present);
             for hash in &pending {
                 let data = store.get_encoded(hash).with_context(|| {
-                    format!("remote needs {} but it is not in the local store — run `git cdc pull` first", oid_str(hash))
+                    format!("remote needs {} but it is not in the local store — run `git cdc pull` first (a dropped chunk from `git cdc drop --chunks` needs refetching)", oid_str(hash))
                 })?;
                 remote_store.put_encoded(hash, data).await?;
             }
@@ -138,7 +229,7 @@ pub fn cmd_push() -> Result<()> {
             for hash in &pending {
                 let data = store.get_encoded(hash).with_context(|| {
                     format!(
-                        "ssh remote needs {} but it is not in the local store — run `git cdc pull` first",
+                        "ssh remote needs {} but it is not in the local store — run `git cdc pull` first (a dropped chunk from `git cdc drop --chunks` needs refetching)",
                         oid_str(hash)
                     )
                 })?;
@@ -224,7 +315,7 @@ pub fn cmd_pull() -> Result<()> {
     }
 
     // Materialize worktree files still in passed-through-manifest state.
-    let mut materialized = 0usize;
+    let mut materialized: Vec<&str> = Vec::new();
     for (path, m) in &tracked {
         let abs = root.join(path);
         let worktree = fs::read(&abs).unwrap_or_default();
@@ -242,9 +333,131 @@ pub fn cmd_pull() -> Result<()> {
             bail!("{path}: reassembled content does not match manifest oid");
         }
         fs::write(&abs, out)?;
-        materialized += 1;
+        materialized.push(path);
     }
-    eprintln!("git-cdc: materialized {materialized} files");
+    settle_index(&root, &materialized)?;
+    eprintln!("git-cdc: materialized {} files", materialized.len());
+    // After the count, so the actionable advice is the last thing on screen.
+    warn_chunk_param_mismatch(&tracked);
+    Ok(())
+}
+
+/// Warn when this repo's `cdc.chunk.*` disagrees with the parameters the
+/// tracked manifests were committed with, and name the config that matches.
+///
+/// Chunk boundaries are reproducible only for a given parameter set, so a
+/// clone configured differently re-chunks files nobody edited: the next
+/// `git add` rewrites their manifests, `git status` reports them modified
+/// until it does, and `push` uploads a second copy of content the remote
+/// already has under different hashes. Nothing is corrupted — reassembly goes
+/// by chunk hash, so content stays byte-identical — but the dedup the whole
+/// design exists for quietly stops working.
+fn warn_chunk_param_mismatch(tracked: &[(String, git_cdc_core::manifest::Manifest)]) {
+    let Ok(local) = crate::git::chunk_params() else {
+        return; // a broken config is `clean`'s error to report, not ours
+    };
+    let mut counts: HashMap<(u32, u32, u32), usize> = HashMap::new();
+    for (_, m) in tracked {
+        *counts
+            .entry((m.chunk_min, m.chunk_avg, m.chunk_max))
+            .or_default() += 1;
+    }
+    // The prevailing committed set — mixed histories are possible, and the
+    // majority is the one worth matching.
+    let Some((&(min, avg, max), n)) = counts.iter().max_by_key(|(_, n)| **n) else {
+        return;
+    };
+    if (min, avg, max) == (local.min, local.avg, local.max) {
+        return;
+    }
+    let inherit = git_out(&["config", "--type=bool", "--get", "cdc.chunk.inherit"])
+        .map(|v| v != "false")
+        .unwrap_or(true);
+    eprintln!(
+        "git-cdc: note: {n} tracked file(s) were committed with chunk parameters \
+         (min/avg/max {min}/{avg}/{max}) that differ from this repo's config \
+         ({}/{}/{}).",
+        local.min, local.avg, local.max
+    );
+    if inherit {
+        eprintln!(
+            "git-cdc: those files keep their committed parameters, but new files \
+             added here will use this repo's config — a mix that costs dedup. \
+             To match the rest of the repo:"
+        );
+    } else {
+        eprintln!(
+            "git-cdc: cdc.chunk.inherit is false, so the next `git add` will \
+             re-chunk them too, losing dedup against what the remote already \
+             has. To match the committed settings:"
+        );
+    }
+    eprintln!("git-cdc:     git config cdc.chunk.min {min}");
+    eprintln!("git-cdc:     git config cdc.chunk.avg {avg}");
+    eprintln!("git-cdc:     git config cdc.chunk.max {max}");
+}
+
+/// Make `git status` agree that just-materialized files are unmodified.
+///
+/// Growing a file from its manifest to its content leaves git's stat cache
+/// holding the manifest's size, and git reports the mismatch as an unstaged
+/// modification without ever re-running the clean filter. `--refresh` alone
+/// cannot fix it — it, `--really-refresh`, and `--again` are all stat-only.
+///
+/// So: rewrite each entry with `--cacheinfo` (same mode and blob, which zeroes
+/// the recorded size), then `--refresh`. A zero size is git's own signal that
+/// stat data was never read and the content must be compared for real, which
+/// runs the clean filter and settles the entry properly.
+///
+/// Deliberately not `git add`: that re-chunks with the *current* `cdc.chunk.*`
+/// config and silently stages a different manifest when those changed since
+/// the commit. `--cacheinfo` + `--refresh` can only ever update stat data, so
+/// a genuinely divergent file stays honestly unstaged-modified instead.
+///
+/// ponytail: costs one clean-filter pass over what was just pulled (measured
+/// +45% on a 34 MB file: 0.118s on top of pull's 0.262s). A file that does
+/// diverge keeps a zeroed size, so every later `git status` re-checks it —
+/// unavoidable, since its content really does differ from the index.
+fn settle_index(root: &std::path::Path, paths: &[&str]) -> Result<()> {
+    if paths.is_empty() {
+        return Ok(());
+    }
+    let root = root.to_string_lossy().into_owned();
+    // Mode matters: an executable tracked file must not come back as 100644.
+    let listed = git_out(&[
+        "-c",
+        crate::git::QUOTE_PATH,
+        "-C",
+        &root,
+        "ls-files",
+        "-s",
+        "--",
+    ])?;
+    let mut args: Vec<String> = vec!["-C".into(), root, "update-index".into()];
+    for line in listed.lines() {
+        // "<mode> <blob> <stage>\t<path>"
+        let Some((meta, path)) = line.split_once('\t') else {
+            continue;
+        };
+        if !paths.contains(&path) {
+            continue;
+        }
+        let mut fields = meta.split_whitespace();
+        let (Some(mode), Some(blob)) = (fields.next(), fields.next()) else {
+            continue;
+        };
+        args.push("--cacheinfo".into());
+        args.push(format!("{mode},{blob},{path}"));
+    }
+    if args.len() == 3 {
+        return Ok(()); // nothing resolvable — leave the index alone
+    }
+    git_out(&args.iter().map(String::as_str).collect::<Vec<_>>())?;
+    // Advisory: exits non-zero listing entries it could not settle (a file
+    // that genuinely differs from its manifest), which is not our failure.
+    let _ = std::process::Command::new("git")
+        .args(["-C", &args[1], "update-index", "--refresh"])
+        .output();
     Ok(())
 }
 
@@ -342,6 +555,154 @@ pub fn cmd_gc(dry_run: bool, grace_secs: u64) -> Result<()> {
             );
         }
         Err(_) => eprintln!("git-cdc: no remote configured, skipped remote gc"),
+    }
+    Ok(())
+}
+
+/// Reclaim local disk. A tracked file costs it twice — the hydrated worktree
+/// copy plus its chunks — so `drop` rewrites the file back to its committed
+/// manifest (the state a fresh clone is in, which `cmd_pull` reverses) and,
+/// with `--chunks`, removes chunks the remote provably holds.
+pub fn cmd_drop(paths: &[String], all: bool, chunks: bool, dry_run: bool) -> Result<()> {
+    let tracked = index_manifests()?;
+    let selected: Vec<&(String, git_cdc_core::manifest::Manifest)> = if all {
+        tracked.iter().collect()
+    } else if paths.is_empty() {
+        bail!("usage: git cdc drop [--chunks] [--dry-run] --all | <path>...");
+    } else {
+        resolve_paths(paths, &tracked)?
+            .into_iter()
+            .map(|i| &tracked[i])
+            .collect()
+    };
+    if selected.is_empty() {
+        eprintln!("git-cdc: no tracked files selected, nothing to drop");
+        return Ok(());
+    }
+
+    let store = local_store()?;
+    let root = repo_root()?;
+
+    // Everything that can fail is resolved before the first byte is written:
+    // `--chunks` without a usable remote must abort with no side effects,
+    // worktree rewrites included.
+    let candidates: HashMap<blake3::Hash, u64> = if chunks {
+        selected
+            .iter()
+            .flat_map(|(_, m)| m.chunks.iter())
+            .filter(|c| store.has(&c.hash))
+            .map(|c| (c.hash, c.length as u64))
+            .collect()
+    } else {
+        HashMap::new()
+    };
+    let removable = if chunks {
+        match remote_present(&candidates) {
+            Ok(present) => present,
+            // A dry run deletes nothing, so it stays useful without a remote:
+            // report the worktree half rather than refusing to run at all.
+            Err(e) if dry_run => {
+                eprintln!("git-cdc: no usable remote ({e:#}); chunks would be kept");
+                HashSet::new()
+            }
+            Err(e) => return Err(e.context(
+                "--chunks needs a remote: a chunk is only safe to delete locally once the remote has it",
+            )),
+        }
+    } else {
+        HashSet::new()
+    };
+
+    let (mut dropped, mut skipped, mut modified, mut freed) = (0usize, 0usize, 0usize, 0u64);
+    // Chunks a dropped file no longer needs locally, minus any a skipped
+    // file still does — dedup means one chunk can belong to both.
+    let mut reclaimable: HashSet<blake3::Hash> = HashSet::new();
+    let mut pinned: HashSet<blake3::Hash> = HashSet::new();
+    for (path, m) in &selected {
+        let abs = root.join(path);
+        let Ok(content) = fs::read(&abs) else {
+            skipped += 1; // absent from the worktree — nothing to reclaim
+            continue;
+        };
+        if is_manifest(&content) {
+            // Already dropped (or never materialized). Its chunks are still
+            // reclaimable — `drop` then `drop --chunks` on the same file must
+            // reach them on the second run.
+            reclaimable.extend(m.chunks.iter().map(|c| c.hash));
+            skipped += 1;
+            continue;
+        }
+        // The one irreversible mistake this command could make: uncommitted
+        // edits were never chunked (the clean filter runs at `git add`), so
+        // they exist in no store and overwriting them destroys them.
+        if blake3::hash(&content) != m.oid {
+            eprintln!(
+                "git-cdc: {path}: worktree content does not match the committed manifest (uncommitted changes?) — skipped"
+            );
+            // Its committed chunks stay local even if a sibling file shares
+            // them, so `git checkout -- <path>` can still restore it without
+            // reaching for the network.
+            pinned.extend(m.chunks.iter().map(|c| c.hash));
+            skipped += 1;
+            modified += 1;
+            continue;
+        }
+        if !dry_run {
+            // The index blob verbatim, never a re-encoded manifest: the blob
+            // oid must not drift from what is committed.
+            let blob = std::process::Command::new("git")
+                .args(["show", &format!(":{path}")])
+                .current_dir(&root)
+                .output()
+                .context("running git show")?;
+            if !blob.status.success() {
+                bail!("{path}: git show :{path} failed");
+            }
+            fs::write(&abs, &blob.stdout)?;
+            // Mandatory: git distrusts the file-size drop and reports the
+            // file modified until the clean filter re-runs. `git update-index
+            // --refresh` does not clear it; re-adding does, and stages
+            // nothing because manifest text cleans to the same blob.
+            git_out(&["-C", &root.to_string_lossy(), "add", "--", path]).with_context(|| {
+                format!("{path}: rewritten to its manifest but `git add` failed — run `git add -- {path}` to settle the index")
+            })?;
+        }
+        reclaimable.extend(m.chunks.iter().map(|c| c.hash));
+        dropped += 1;
+        freed += m.size;
+    }
+    if modified == selected.len() {
+        bail!("every selected file has uncommitted changes; nothing dropped");
+    }
+
+    // Only chunks belonging to files that actually reached manifest state —
+    // a file skipped for uncommitted edits keeps its chunks, so a later
+    // `git checkout` of it still restores content from the local store.
+    let (mut removed, mut chunk_bytes) = (0usize, 0u64);
+    for hash in removable
+        .intersection(&reclaimable)
+        .filter(|h| !pinned.contains(*h))
+    {
+        if !dry_run {
+            store.remove(hash)?;
+        }
+        chunk_bytes += candidates.get(hash).copied().unwrap_or(0);
+        removed += 1;
+    }
+    for hash in candidates.keys().filter(|h| !removable.contains(*h)) {
+        eprintln!(
+            "git-cdc: {} is not on the remote — kept locally",
+            oid_str(hash)
+        );
+    }
+
+    let verb = if dry_run { "would drop" } else { "dropped" };
+    eprintln!(
+        "git-cdc: {verb} {dropped} files ({skipped} skipped), {removed} of {} local chunks; {freed} bytes of worktree + {chunk_bytes} bytes of chunks freed",
+        candidates.len(),
+    );
+    if dropped > 0 && !dry_run {
+        eprintln!("git-cdc: run `git cdc pull` to restore file content");
     }
     Ok(())
 }

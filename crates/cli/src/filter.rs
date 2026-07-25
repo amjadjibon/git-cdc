@@ -8,7 +8,7 @@ use git_cdc_core::chunker::{ChunkParams, chunk_stream};
 use git_cdc_core::manifest::{Manifest, is_manifest};
 use git_cdc_core::store::{ChunkStore, DiskStore};
 
-use crate::git::{chunk_params, local_store};
+use crate::git::{ChunkParamsFor, chunk_params, local_store};
 
 /// Clean: file content in, manifest out. Shared by the one-shot filter and
 /// the filter-process loop.
@@ -69,10 +69,14 @@ fn smudge_stream(mut reader: impl Read, mut writer: impl Write, store: &DiskStor
     Ok(())
 }
 
-pub fn cmd_clean() -> Result<()> {
+/// `path` comes from `%f` in the filter config. Installs predating that
+/// pass nothing, and simply fall back to this repo's `cdc.chunk.*`.
+pub fn cmd_clean(path: Option<&str>) -> Result<()> {
     let stdin = std::io::stdin().lock();
     let stdout = std::io::stdout().lock();
-    clean_stream(stdin, stdout, &local_store()?, chunk_params()?)
+    let mut params = ChunkParamsFor::new(chunk_params()?);
+    let params = params.get(path);
+    clean_stream(stdin, stdout, &local_store()?, params)
 }
 
 pub fn cmd_smudge() -> Result<()> {
@@ -112,7 +116,9 @@ pub fn cmd_filter_process() -> Result<()> {
     write_flush(&mut output)?;
 
     let store = local_store()?;
-    let params = chunk_params()?;
+    // Per-path, so a tracked file keeps the parameters it was committed with
+    // even when this clone's `cdc.chunk.*` says otherwise.
+    let mut params = ChunkParamsFor::new(chunk_params()?);
 
     // Per-file loop: keys, flush, content packets, flush.
     loop {
@@ -147,7 +153,12 @@ pub fn cmd_filter_process() -> Result<()> {
         let mut content = PktReader::new(&mut input);
         let mut result = Vec::new();
         let outcome = match command.as_str() {
-            "clean" => clean_stream(&mut content, &mut result, &store, params),
+            "clean" => clean_stream(
+                &mut content,
+                &mut result,
+                &store,
+                params.get(Some(pathname.as_str())),
+            ),
             "smudge" => smudge_stream(&mut content, &mut result, &store),
             other => Err(anyhow::anyhow!("unsupported filter command {other:?}")),
         };

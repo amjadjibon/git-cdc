@@ -280,3 +280,53 @@ fn full_push_clone_pull_gc_cycle() {
         "v1 fetchable from a second clone after gc"
     );
 }
+
+/// `drop --chunks` against the HTTP server: `remote_present` asks the batch
+/// API rather than listing a bucket, so the "no download action means the
+/// server doesn't have it" reading is a distinct code path from the
+/// serverless remotes covered in tests/serverless.rs.
+#[test]
+fn drop_chunks_against_the_http_server() {
+    let tmp = tempfile::tempdir().unwrap();
+    let server_root = tmp.path().join("server");
+    let url = spawn_server(server_root.join("objects"), Duration::ZERO);
+
+    let repo = tmp.path().join("repo");
+    fs::create_dir(&repo).unwrap();
+    git(&repo, &["init", "-q", "-b", "main"]);
+    setup_repo(&repo, &url);
+    cdc(&repo, &["track", "*.bin"]);
+    let data = test_data(3 * 1024 * 1024, 51);
+    fs::write(repo.join("asset.bin"), &data).unwrap();
+    git(&repo, &["add", "."]);
+    git(&repo, &["commit", "-q", "-m", "v1"]);
+
+    let local = DiskStore::new(repo.join(".git/cdc/objects"));
+    // Before the push the server has nothing, so nothing is safe to delete —
+    // the gate must hold even though every chunk sits in the local store.
+    let before = local.list().unwrap().len();
+    assert!(before > 0);
+    cdc(&repo, &["drop", "--chunks", "asset.bin"]);
+    assert_eq!(
+        local.list().unwrap().len(),
+        before,
+        "chunks the server never received must survive a drop"
+    );
+
+    // The worktree half is independent of the remote and happens regardless.
+    assert!(
+        fs::read(repo.join("asset.bin"))
+            .unwrap()
+            .starts_with(b"version git-cdc/spec/v1\n")
+    );
+    assert_eq!(git(&repo, &["status", "--porcelain"]).trim(), "");
+
+    // Now that the server has them, the same command reclaims the chunks.
+    cdc(&repo, &["push"]);
+    assert_eq!(server_chunk_count(&server_root), before);
+    cdc(&repo, &["drop", "--chunks", "asset.bin"]);
+    assert!(local.list().unwrap().is_empty());
+
+    cdc(&repo, &["pull"]);
+    assert_eq!(fs::read(repo.join("asset.bin")).unwrap(), data);
+}

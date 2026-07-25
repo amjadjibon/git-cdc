@@ -1,7 +1,7 @@
 //! Git plumbing: running git, resolving repo paths/config, and walking
 //! history/index for manifests.
 
-use std::io::{Read, Write};
+use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 use std::path::PathBuf;
 use std::process::Command as Git;
 
@@ -59,6 +59,138 @@ pub fn chunk_params() -> Result<ChunkParams> {
     .validate()
 }
 
+/// Manifests are ~90 bytes per chunk line; even a 100 GB file stays well
+/// under this cap. Anything bigger can't be ours — skip without reading.
+const MAX_MANIFEST_SIZE: u64 = 16 * 1024 * 1024;
+
+/// Git quotes paths outside ASCII unless told not to; every path we read
+/// back from git is used as a real filesystem path, so it must be literal.
+pub const QUOTE_PATH: &str = "core.quotePath=false";
+
+/// Resolves the chunk parameters `clean` should use for a given path.
+///
+/// A file already tracked by git-cdc is re-chunked with the parameters its
+/// *committed* manifest was made with, not whatever this clone has in
+/// `cdc.chunk.*`. Boundaries are only reproducible for a fixed parameter set,
+/// so without this a differently-configured clone silently rewrites manifests
+/// for files nobody edited and uploads a second copy of content the remote
+/// already has. Untracked (new) files, and repos with `cdc.chunk.inherit`
+/// set false, use the local config.
+///
+/// Lookups go through one long-lived `git cat-file --batch`, so a filter
+/// process handling thousands of files spawns one child, not thousands.
+pub struct ChunkParamsFor {
+    local: ChunkParams,
+    inherit: bool,
+    batch: Option<CatFile>,
+}
+
+struct CatFile {
+    child: std::process::Child,
+    stdin: BufWriter<std::process::ChildStdin>,
+    stdout: BufReader<std::process::ChildStdout>,
+}
+
+impl ChunkParamsFor {
+    pub fn new(local: ChunkParams) -> ChunkParamsFor {
+        // Opt-out for anyone deliberately re-chunking a repo to new settings.
+        let inherit = git_out(&["config", "--type=bool", "--get", "cdc.chunk.inherit"])
+            .map(|v| v != "false")
+            .unwrap_or(true);
+        ChunkParamsFor {
+            local,
+            inherit,
+            batch: None,
+        }
+    }
+
+    /// `None` path (the one-shot `clean` on an old install, whose filter
+    /// config predates `%f`) falls back to the local config.
+    pub fn get(&mut self, path: Option<&str>) -> ChunkParams {
+        if !self.inherit {
+            return self.local;
+        }
+        let Some(path) = path.filter(|p| !p.is_empty()) else {
+            return self.local;
+        };
+        self.committed(path).unwrap_or(self.local)
+    }
+
+    fn committed(&mut self, path: &str) -> Option<ChunkParams> {
+        // A path with a newline cannot be addressed on cat-file's line
+        // protocol; such files just use the local config.
+        if path.contains('\n') {
+            return None;
+        }
+        if self.batch.is_none() {
+            let mut child = Git::new("git")
+                .args(["cat-file", "--batch"])
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .ok()?;
+            self.batch = Some(CatFile {
+                stdin: BufWriter::new(child.stdin.take()?),
+                stdout: BufReader::new(child.stdout.take()?),
+                child,
+            });
+        }
+        let batch = self.batch.as_mut()?;
+
+        writeln!(batch.stdin, ":{path}").ok()?;
+        batch.stdin.flush().ok()?;
+        let mut header = String::new();
+        batch.stdout.read_line(&mut header).ok()?;
+        // "<oid> <type> <size>" for a hit; "<rev> missing" otherwise.
+        let mut parts = header.split_whitespace();
+        let (_oid, typ, size) = (parts.next()?, parts.next()?, parts.next());
+        if typ == "missing" {
+            return None;
+        }
+        let size: u64 = size?.parse().ok()?;
+        let size = size as usize;
+        if typ != "blob" || size as u64 > MAX_MANIFEST_SIZE {
+            // Still must drain the body, or the stream desynchronises.
+            let mut body = vec![0u8; size + 1];
+            batch.stdout.read_exact(&mut body).ok()?;
+            return None;
+        }
+        let mut body = vec![0u8; size + 1]; // content + trailing LF
+        batch.stdout.read_exact(&mut body).ok()?;
+        body.pop();
+        if !is_manifest(&body) {
+            return None;
+        }
+        let m = Manifest::parse(&body).ok()?;
+        // A manifest committed with values fastcdc rejects must not be
+        // inherited — chunking on them is undefined in a release build.
+        ChunkParams {
+            min: m.chunk_min,
+            avg: m.chunk_avg,
+            max: m.chunk_max,
+        }
+        .validate()
+        .ok()
+    }
+}
+
+impl Drop for ChunkParamsFor {
+    fn drop(&mut self) {
+        let Some(batch) = self.batch.take() else {
+            return;
+        };
+        let CatFile {
+            mut child,
+            stdin,
+            stdout,
+        } = batch;
+        drop(stdin); // closing the pipe is what tells cat-file to exit
+        drop(stdout);
+        let _ = child.wait();
+    }
+}
+
 pub fn oid_str(hash: &blake3::Hash) -> String {
     format!("blake3:{}", hash.to_hex())
 }
@@ -69,7 +201,6 @@ pub fn oid_str(hash: &blake3::Hash) -> String {
 /// their fixed first line — path/attribute matching would miss renamed
 /// or historical files.
 pub fn all_manifests() -> Result<Vec<Manifest>> {
-    use std::io::{BufRead, BufReader, BufWriter};
     use std::process::Stdio;
 
     let list = git_out(&["rev-list", "--all", "--objects"])?;
@@ -89,10 +220,6 @@ pub fn all_manifests() -> Result<Vec<Manifest>> {
         .context("spawning git cat-file")?;
     let mut to_git = BufWriter::new(cat.stdin.take().unwrap());
     let mut from_git = BufReader::new(cat.stdout.take().unwrap());
-
-    // Manifests are ~90 bytes per chunk line; even a 100 GB file stays well
-    // under this cap. Anything bigger can't be ours — skip without reading.
-    const MAX_MANIFEST_SIZE: u64 = 16 * 1024 * 1024;
 
     let mut manifests = Vec::new();
     for sha in shas {
@@ -129,16 +256,34 @@ pub fn all_manifests() -> Result<Vec<Manifest>> {
 }
 
 /// Tracked (filter=cdc) paths in the index, with their staged manifests.
+///
+/// Every git call runs from the repo root, so the paths returned are always
+/// repo-relative. Run from a subdirectory, a bare `ls-files` would list only
+/// that subtree and name it relative to the cwd, which callers then join onto
+/// `repo_root()` — silently wrong.
 pub fn index_manifests() -> Result<Vec<(String, Manifest)>> {
-    let files = git_out(&["ls-files"])?;
+    let root = repo_root()?;
+    let root = root.to_string_lossy().into_owned();
+    // core.quotePath=false: git C-quotes non-ASCII paths by default
+    // ("caf\303\251.bin"), and the quoted form matches no file on disk.
+    let files = git_out(&["-c", QUOTE_PATH, "-C", &root, "ls-files"])?;
     let mut out = Vec::new();
     for path in files.lines() {
-        let attr = git_out(&["check-attr", "filter", "--", path])?;
+        let attr = git_out(&[
+            "-c",
+            QUOTE_PATH,
+            "-C",
+            &root,
+            "check-attr",
+            "filter",
+            "--",
+            path,
+        ])?;
         if !attr.ends_with(": filter: cdc") {
             continue;
         }
         let blob = Git::new("git")
-            .args(["show", &format!(":{path}")])
+            .args(["-C", &root, "show", &format!(":{path}")])
             .output()?;
         if !blob.status.success() {
             continue;

@@ -43,3 +43,14 @@ yet committed, or mid-upload from another client. The grace period (default
   A stale clone's live set is smaller than reality — the grace period is
   the backstop against races, not against sweeping from a months-old
   checkout.
+
+## Not the same as `drop`
+
+`gc` sweeps chunks that **nothing references any more** — orphans left by
+rewritten or deleted history. It never touches a chunk in the live set.
+
+[`git cdc drop --chunks`](commands.md#reclaiming-local-disk-with-drop) does
+the opposite: it removes chunks that *are* live, from the local store only,
+once the remote confirms it holds them. Reach for `gc` to clear garbage, and
+`drop` to reclaim disk from files you still care about but don't need
+materialized right now.

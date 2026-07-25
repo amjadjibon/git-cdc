@@ -35,14 +35,19 @@ pub fn git(repo: &Path, args: &[&str]) -> String {
     String::from_utf8_lossy(&out.stdout).into_owned()
 }
 
-pub fn cdc(repo: &Path, args: &[&str]) -> String {
-    let out = Command::new(BIN)
+/// Run git-cdc without asserting success (e.g. to test a refused drop).
+pub fn cdc_cmd(repo: &Path, args: &[&str]) -> std::process::Output {
+    Command::new(BIN)
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .env("GIT_CONFIG_SYSTEM", "/dev/null")
         .args(args)
         .current_dir(repo)
         .output()
-        .unwrap();
+        .unwrap()
+}
+
+pub fn cdc(repo: &Path, args: &[&str]) -> String {
+    let out = cdc_cmd(repo, args);
     assert!(
         out.status.success(),
         "git-cdc {args:?} failed: {}",
@@ -60,7 +65,7 @@ pub fn base_setup_repo(repo: &Path) {
     cdc(repo, &["install"]);
     git(
         repo,
-        &["config", "filter.cdc.clean", &format!("{BIN} clean")],
+        &["config", "filter.cdc.clean", &format!("{BIN} clean %f")],
     );
     git(
         repo,
