@@ -85,7 +85,14 @@ fn resolve_paths(
 ) -> Result<Vec<usize>> {
     let mut out = Vec::new();
     for arg in args {
-        let listed = git_out(&["ls-files", "--full-name", "--", arg])?;
+        let listed = git_out(&[
+            "-c",
+            crate::git::QUOTE_PATH,
+            "ls-files",
+            "--full-name",
+            "--",
+            arg,
+        ])?;
         let hits: Vec<&str> = listed
             .lines()
             .map(str::trim)
@@ -492,6 +499,7 @@ pub fn cmd_drop(paths: &[String], all: bool, chunks: bool, dry_run: bool) -> Res
     };
 
     let (mut dropped, mut skipped, mut modified, mut freed) = (0usize, 0usize, 0usize, 0u64);
+    let mut reclaimable: HashSet<blake3::Hash> = HashSet::new();
     for (path, m) in &selected {
         let abs = root.join(path);
         let Ok(content) = fs::read(&abs) else {
@@ -499,7 +507,11 @@ pub fn cmd_drop(paths: &[String], all: bool, chunks: bool, dry_run: bool) -> Res
             continue;
         };
         if is_manifest(&content) {
-            skipped += 1; // already dropped (or never materialized)
+            // Already dropped (or never materialized). Its chunks are still
+            // reclaimable — `drop` then `drop --chunks` on the same file must
+            // reach them on the second run.
+            reclaimable.extend(m.chunks.iter().map(|c| c.hash));
+            skipped += 1;
             continue;
         }
         // The one irreversible mistake this command could make: uncommitted
@@ -529,20 +541,27 @@ pub fn cmd_drop(paths: &[String], all: bool, chunks: bool, dry_run: bool) -> Res
             // file modified until the clean filter re-runs. `git update-index
             // --refresh` does not clear it; re-adding does, and stages
             // nothing because manifest text cleans to the same blob.
-            git_out(&["-C", &root.to_string_lossy(), "add", "--", path])?;
+            git_out(&["-C", &root.to_string_lossy(), "add", "--", path]).with_context(|| {
+                format!("{path}: rewritten to its manifest but `git add` failed — run `git add -- {path}` to settle the index")
+            })?;
         }
+        reclaimable.extend(m.chunks.iter().map(|c| c.hash));
         dropped += 1;
         freed += m.size;
     }
-    if dropped == 0 && modified > 0 {
+    if modified == selected.len() {
         bail!("every selected file has uncommitted changes; nothing dropped");
     }
 
-    let mut removed = 0usize;
-    for hash in &removable {
+    // Only chunks belonging to files that actually reached manifest state —
+    // a file skipped for uncommitted edits keeps its chunks, so a later
+    // `git checkout` of it still restores content from the local store.
+    let (mut removed, mut chunk_bytes) = (0usize, 0u64);
+    for hash in removable.intersection(&reclaimable) {
         if !dry_run {
             store.remove(hash)?;
         }
+        chunk_bytes += candidates.get(hash).copied().unwrap_or(0);
         removed += 1;
     }
     for hash in candidates.keys().filter(|h| !removable.contains(*h)) {
@@ -554,7 +573,7 @@ pub fn cmd_drop(paths: &[String], all: bool, chunks: bool, dry_run: bool) -> Res
 
     let verb = if dry_run { "would drop" } else { "dropped" };
     eprintln!(
-        "git-cdc: {verb} {dropped} files ({skipped} skipped), {removed} of {} local chunks, {freed} bytes freed",
+        "git-cdc: {verb} {dropped} files ({skipped} skipped), {removed} of {} local chunks; {freed} bytes of worktree + {chunk_bytes} bytes of chunks freed",
         candidates.len(),
     );
     if dropped > 0 && !dry_run {

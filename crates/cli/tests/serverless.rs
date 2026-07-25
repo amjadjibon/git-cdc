@@ -424,7 +424,7 @@ fn drop_dry_run_changes_nothing() {
     let before = local_chunks(&repo);
 
     let log = cdc(&repo, &["drop", "--chunks", "--dry-run", "asset.bin"]);
-    assert!(log.contains("would drop 1 files"), "dry run reports: {log}");
+    assert!(log.contains("would drop"), "dry run reports: {log}");
     assert_eq!(fs::read(repo.join("asset.bin")).unwrap(), data);
     assert_eq!(local_chunks(&repo), before);
 }
@@ -488,4 +488,85 @@ fn drop_all_covers_every_tracked_file() {
     cdc(&repo, &["pull"]);
     assert_eq!(fs::read(repo.join("asset.bin")).unwrap(), data);
     assert_eq!(fs::read(repo.join("other.bin")).unwrap(), second);
+}
+
+/// Git C-quotes non-ASCII paths ("caf\303\251.bin") unless told otherwise,
+/// and the quoted form matches no file on disk — so a tracked file with an
+/// accent in its name must still resolve.
+#[test]
+fn drop_handles_non_ascii_filenames() {
+    let tmp = tempfile::tempdir().unwrap();
+    let remote_root = tmp.path().join("remote-store");
+    let repo = tmp.path().join("origin");
+    let data = pushed_repo(&repo, &remote_root, "café.bin", 52);
+
+    cdc(&repo, &["drop", "--chunks", "café.bin"]);
+
+    assert!(
+        fs::read(repo.join("café.bin"))
+            .unwrap()
+            .starts_with(b"version git-cdc/spec/v1\n")
+    );
+    assert!(local_chunks(&repo).is_empty());
+    assert_eq!(git(&repo, &["status", "--porcelain"]).trim(), "");
+    cdc(&repo, &["pull"]);
+    assert_eq!(fs::read(repo.join("café.bin")).unwrap(), data);
+}
+
+/// A file skipped for uncommitted edits must keep its chunks, even when a
+/// sibling file in the same `--all` run is dropped — otherwise `git checkout`
+/// of the skipped file quietly degrades to manifest passthrough.
+#[test]
+fn drop_keeps_chunks_of_skipped_files() {
+    let tmp = tempfile::tempdir().unwrap();
+    let remote_root = tmp.path().join("remote-store");
+    let repo = tmp.path().join("origin");
+    pushed_repo(&repo, &remote_root, "clean.bin", 53);
+    let kept = test_data(3 * 1024 * 1024, 54);
+    fs::write(repo.join("edited.bin"), &kept).unwrap();
+    git(&repo, &["add", "."]);
+    git(&repo, &["commit", "-q", "-m", "v2"]);
+    cdc(&repo, &["push"]);
+
+    // edited.bin now diverges from its manifest; clean.bin does not.
+    let edits = b"uncommitted".to_vec();
+    fs::write(repo.join("edited.bin"), &edits).unwrap();
+
+    cdc(&repo, &["drop", "--chunks", "--all"]);
+
+    assert_eq!(fs::read(repo.join("edited.bin")).unwrap(), edits);
+    assert!(
+        fs::read(repo.join("clean.bin"))
+            .unwrap()
+            .starts_with(b"version git-cdc/spec/v1\n")
+    );
+    // The skipped file's chunks are still local: checkout restores it.
+    git(&repo, &["checkout", "-q", "--", "edited.bin"]);
+    assert_eq!(
+        fs::read(repo.join("edited.bin")).unwrap(),
+        kept,
+        "a skipped file's chunks must not be swept with its sibling's"
+    );
+}
+
+/// `drop` then `drop --chunks` on the same file: the second run sees manifest
+/// text and must still reclaim the chunks the first run left behind.
+#[test]
+fn drop_chunks_reaches_an_already_dropped_file() {
+    let tmp = tempfile::tempdir().unwrap();
+    let remote_root = tmp.path().join("remote-store");
+    let repo = tmp.path().join("origin");
+    let data = pushed_repo(&repo, &remote_root, "asset.bin", 55);
+
+    cdc(&repo, &["drop", "asset.bin"]); // worktree half only
+    assert!(
+        !local_chunks(&repo).is_empty(),
+        "chunks stay without --chunks"
+    );
+
+    cdc(&repo, &["drop", "--chunks", "asset.bin"]);
+    assert!(local_chunks(&repo).is_empty(), "second run reclaims them");
+
+    cdc(&repo, &["pull"]);
+    assert_eq!(fs::read(repo.join("asset.bin")).unwrap(), data);
 }

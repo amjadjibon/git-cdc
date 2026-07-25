@@ -59,6 +59,10 @@ pub fn chunk_params() -> Result<ChunkParams> {
     .validate()
 }
 
+/// Git quotes paths outside ASCII unless told not to; every path we read
+/// back from git is used as a real filesystem path, so it must be literal.
+pub const QUOTE_PATH: &str = "core.quotePath=false";
+
 pub fn oid_str(hash: &blake3::Hash) -> String {
     format!("blake3:{}", hash.to_hex())
 }
@@ -137,10 +141,21 @@ pub fn all_manifests() -> Result<Vec<Manifest>> {
 pub fn index_manifests() -> Result<Vec<(String, Manifest)>> {
     let root = repo_root()?;
     let root = root.to_string_lossy().into_owned();
-    let files = git_out(&["-C", &root, "ls-files"])?;
+    // core.quotePath=false: git C-quotes non-ASCII paths by default
+    // ("caf\303\251.bin"), and the quoted form matches no file on disk.
+    let files = git_out(&["-c", QUOTE_PATH, "-C", &root, "ls-files"])?;
     let mut out = Vec::new();
     for path in files.lines() {
-        let attr = git_out(&["-C", &root, "check-attr", "filter", "--", path])?;
+        let attr = git_out(&[
+            "-c",
+            QUOTE_PATH,
+            "-C",
+            &root,
+            "check-attr",
+            "filter",
+            "--",
+            path,
+        ])?;
         if !attr.ends_with(": filter: cdc") {
             continue;
         }
