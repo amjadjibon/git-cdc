@@ -5,7 +5,7 @@ addressing large files by whole-file hash (where a 1-byte edit re-uploads the
 entire file), git-cdc splits files into variable-size chunks at content-defined
 boundaries (FastCDC) and stores them in a content-addressable store keyed by
 BLAKE3. Edit 4 bytes in a 30 MiB file and only the one changed chunk (~2 MiB)
-is uploaded — the other 12 are already on the server.
+is uploaded — the other ~14 are already on the server.
 
 ```text
 git add ──▶ clean filter ──▶ chunker ──▶ manifest (committed to git)
@@ -36,11 +36,23 @@ Full format definition: [docs/spec/manifest.md](docs/spec/manifest.md).
 
 ## Install
 
+Prebuilt `git-cdc` binaries (linux/macOS, x86_64 + arm64) are attached to
+each [release](https://github.com/amjadjibon/git-cdc/releases) — untar and
+put `git-cdc` on `$PATH`; `git cdc <cmd>` then works via git's `git-<name>`
+extension mechanism, same as git-lfs.
+
+From source:
+
 ```sh
-cargo build --release
-# put both binaries on $PATH; `git cdc <cmd>` works via git's
-# git-<name> extension mechanism, same as git-lfs
-cp target/release/git-cdc target/release/git-cdc-server ~/.local/bin/
+cargo install --path crates/cli       # `git-cdc`
+cargo install --path crates/server    # optional: `git-cdc-server`
+```
+
+The server also ships as a container image:
+
+```sh
+docker run -p 8077:8077 -v cdc-data:/data -e GIT_CDC_TOKEN=secret \
+  ghcr.io/amjadjibon/git-cdc-server:latest
 ```
 
 ## Quick start
@@ -242,7 +254,7 @@ write and read, and reassembled files are checked against the whole-file oid.
 | `git cdc pull` | Fetch missing chunks for the current checkout and materialize files |
 | `git cdc gc [--dry-run] [--grace-secs N]` | Mark-and-sweep unreferenced chunks, locally and on the server |
 | `git cdc drop [--chunks] [--dry-run] --all \| <path>…` | Reclaim local disk: collapse tracked files back to their manifest, optionally dropping local chunks the remote already has |
-| `git cdc diff <a> <b>` | Chunk-level changelist between two manifest files |
+| `git cdc diff [<a> <b>]` | Chunk-level changelist between two manifest files; with no arguments, every tracked file between HEAD and the index |
 
 ### Reclaiming local disk
 
