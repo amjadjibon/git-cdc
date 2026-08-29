@@ -6,7 +6,7 @@ edition = "2024"
 [dependencies]
 anyhow = "1"
 blake3 = { version = "1", features = ["std"] }
-fastcdc = "4.0.1"
+fastcdc = "5.0.0"
 opendal = { version = "0.57", default-features = false, features = [
     "services-azblob",
     "services-azfile",
